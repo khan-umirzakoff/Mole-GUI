@@ -42,6 +42,8 @@ struct SettingsPage: View {
                              glow: .sage, entries: $whitelist) { ConfigList.whitelist.write($0) }
                 PathListCard(title: "Project scan folders",
                              caption: "Where Projects looks for build folders.",
+                             warning: purgePaths.contains { ["~", "~/", NSHomeDirectory()].contains($0) }
+                                ? "Your whole home folder is slow to scan and can time out. Project folders work best." : "",
                              glow: .blue, entries: $purgePaths) { ConfigList.purgePaths.write($0) }
             }
 
@@ -147,6 +149,7 @@ enum Uninstaller {
 private struct PathListCard: View {
     let title: String
     let caption: String
+    var warning = ""
     let glow: Glow
     @Binding var entries: [String]
     let save: ([String]) -> Void
@@ -157,6 +160,10 @@ private struct PathListCard: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text(title).cardTitle()
                 Text(caption).caption()
+                if !warning.isEmpty {
+                    Label(warning, systemImage: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11.5)).foregroundStyle(.orange)
+                }
                 VStack(spacing: 6) {
                     if entries.isEmpty {
                         Text("None yet").font(.system(size: 12)).foregroundStyle(Theme.tertiaryText)
