@@ -70,7 +70,8 @@ enum Page: String, CaseIterable, Identifiable {
 /// Shared state: navigation, the running Mole session and the last scan of each tool.
 @MainActor
 final class AppModel: ObservableObject {
-    @Published var page: Page = .overview
+    /// `-startPage clean` on the command line opens a page directly (handy for screenshots).
+    @Published var page = Page(rawValue: UserDefaults.standard.string(forKey: "startPage") ?? "") ?? .overview
     @Published var session: MoleSession?
     /// Pages with work in progress, marked in the sidebar.
     @Published private(set) var busy = Set<Page>()

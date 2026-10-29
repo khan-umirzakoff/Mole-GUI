@@ -27,10 +27,23 @@ struct BurrowApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var signalSources: [DispatchSourceSignal] = []
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Started from `swift run` the binary is not an app bundle yet; make it a normal app.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
+        // `kill` or a logout skips applicationWillTerminate; stop Mole's processes then too.
+        for sig in [SIGTERM, SIGHUP, SIGINT] {
+            signal(sig, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+            source.setEventHandler {
+                Mole.terminateAll()
+                exit(0)
+            }
+            source.resume()
+            signalSources.append(source)
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) { Mole.terminateAll() }
