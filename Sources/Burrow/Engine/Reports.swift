@@ -186,11 +186,18 @@ struct AnalyzeResult: Decodable {
         let size: Int64
         let is_dir: Bool?
         let last_access: String?
-        var id: String { path }
+        /// Whole-Mac overview only: a summary such as "Old Downloads (90d+)", whose `path` is the
+        /// folder it was found in and whose `size` is only the part it describes.
+        let insight: Bool?
+        let cleanable: Bool?
+        var id: String { path + name }
         var isDirectory: Bool { is_dir ?? false }
+        var isInsight: Bool { insight ?? false }
     }
 
     let path: String?
+    /// True for the whole-Mac tour: its entries overlap (Home contains User Library) and do not add up.
+    let overview: Bool?
     let scan_status: String?
     let entries: [Entry]?
     let large_files: [Entry]?

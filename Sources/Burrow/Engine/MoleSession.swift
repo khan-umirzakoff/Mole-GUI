@@ -68,9 +68,14 @@ final class MoleSession: ObservableObject, Identifiable {
 
         var size = winsize(ws_row: 50, ws_col: 140, ws_xpixel: 0, ws_ypixel: 0)
         var master: Int32 = -1
+        var unblocked: sigset_t = 0
         let child = forkpty(&master, nil, nil, &size)
         if child == 0 {
-            // Child: only async-signal-safe calls until exec.
+            // Child: only async-signal-safe calls until exec. Ignored signals and the signal mask
+            // survive exec, and bash cannot trap a signal that was ignored when it started, so
+            // Mole gets clean defaults: Stop (SIGINT) then runs Mole's own cleanup traps.
+            for sig in [SIGINT, SIGTERM, SIGHUP, SIGQUIT, SIGPIPE] { _ = signal(sig, SIG_DFL) }
+            _ = sigprocmask(SIG_SETMASK, &unblocked, nil)
             _ = chdir(home)
             execve(exe, argv, envp)
             _exit(127)

@@ -38,7 +38,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate()
         // `kill` or a logout skips applicationWillTerminate; stop Mole's processes then too.
         for sig in [SIGTERM, SIGHUP, SIGINT] {
-            signal(sig, SIG_IGN)
+            // A do-nothing handler, not SIG_IGN: an ignored signal is inherited by every Mole
+            // process Burrow starts, while a handled one is reset to the default on exec.
+            signal(sig) { _ in }
             let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
             source.setEventHandler {
                 Mole.terminateAll()

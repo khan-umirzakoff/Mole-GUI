@@ -79,7 +79,9 @@ struct MetricValue: View {
     }
 
     private func row(_ dot: CGFloat) -> some View {
-        HStack(alignment: .lastTextBaseline, spacing: 8) {
+        // Bottom, not baseline: a canvas has no baseline, and aligning the unit's baseline to the
+        // dots' bottom pushed its descender below the row's frame.
+        HStack(alignment: .bottom, spacing: 8) {
             if live {
                 DotMatrixText(text: value, dot: dot)
             } else {

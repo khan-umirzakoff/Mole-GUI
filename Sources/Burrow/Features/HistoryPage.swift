@@ -63,7 +63,7 @@ struct HistoryPage: View {
                         HStack(spacing: 8) {
                             Text(s.title).cardTitle()
                             if s.isPreview { Tag(text: "Preview") }
-                            if s.ended_at?.isEmpty ?? true { Tag(text: "Interrupted", color: .orange) }
+                            if s.looksInterrupted { Tag(text: "Interrupted", color: .orange) }
                         }
                         Text(s.when).caption()
                         if let a = s.actions {
@@ -130,11 +130,23 @@ extension HistoryResult.Session {
         return (items ?? 0) > 0 || [a?.removed, a?.trashed, a?.rebuilt, a?.failed].contains { ($0 ?? 0) > 0 }
     }
 
+    var startedDate: Date? {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return f.date(from: started_at)
+    }
+
+    /// No end time and started over an hour ago. A run without an end time that began recently
+    /// may simply still be running.
+    var looksInterrupted: Bool {
+        guard ended_at?.isEmpty ?? true, let start = startedDate else { return false }
+        return Date().timeIntervalSince(start) > 3600
+    }
+
     /// "Today, 03:20" from Mole's "2026-10-30 03:20:38".
     var when: String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        guard let date = f.date(from: started_at) else { return started_at }
+        guard let date = startedDate else { return started_at }
         return date.formatted(.relative(presentation: .named)) + " · " + date.formatted(date: .abbreviated, time: .shortened)
     }
 }

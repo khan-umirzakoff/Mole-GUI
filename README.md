@@ -9,8 +9,10 @@ remove project build folders and old installers, slim universal apps, and watch 
 ## Why
 
 Mole is excellent but lives in the terminal, and its own app is paid. Burrow puts a native
-SwiftUI window on top of the same engine. Every change still goes through Mole, so its safety
-checks, protection rules and Trash-first deletes stay in charge.
+SwiftUI window on top of the same engine. Clean, Uninstall, Optimize, Slim and removing all build
+folders run through Mole, so its safety checks, protection rules and Trash-first deletes stay in
+charge. The few things Burrow removes itself (installers, single build folders, Disk Map items you
+pick) go to the Trash.
 
 ## What is inside
 
@@ -57,8 +59,8 @@ Requires macOS 26 or later on Apple silicon.
 
 Mole ships inside the app (`Contents/Resources/mole`); nothing is installed into your system.
 Mole keeps its settings and logs in `~/.config/mole`, `~/.cache/mole` and `~/Library/Logs/mole`.
-**Settings → Remove Burrow completely** deletes those, the app's preferences, and moves the app
-to the Trash.
+**Settings → Remove Burrow completely** moves those, the app's preferences and the app to the
+Trash. If Mole is also installed on its own (`mo` on your PATH), Mole's files stay.
 
 ## Build
 

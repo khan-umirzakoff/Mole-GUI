@@ -94,6 +94,7 @@ struct OptimizePage: View {
                         Spacer()
                         if scan.scanning { ScanningBadge(started: scan.startedAt).transition(.blurFade) }
                     }
+                    .frame(height: 28)
                     HStack(alignment: .bottom, spacing: 16) {
                         VStack(alignment: .leading, spacing: 12) {
                             Group {
@@ -107,7 +108,7 @@ struct OptimizePage: View {
                                     MetricValue(value: "\(pendingSteps)", unit: pendingSteps == 1 ? "step to run" : "steps to run", dot: 7)
                                 }
                             }
-                            .frame(height: 80, alignment: .bottomLeading)
+                            .frame(minHeight: 84, alignment: .bottomLeading)
                             Text(footnote).font(.system(size: 12))
                                 .foregroundStyle(scan.error != nil && !scan.scanning ? Theme.danger : Theme.secondaryText)
                                 .lineLimit(2)
@@ -124,7 +125,8 @@ struct OptimizePage: View {
                     }
                 }
             }
-            .frame(height: 216)
+            .frame(minHeight: 216)
+            .fixedSize(horizontal: false, vertical: true)
             .animation(Motion.spring, value: scan.scanning)
 
             if let report {
@@ -136,7 +138,9 @@ struct OptimizePage: View {
                         }
                     }
                 }
-                SectionGrid(sections: report.sections, glow: .sage)
+                Label("Preview of what Optimize checks and would do. Nothing has run yet.", systemImage: "eye")
+                    .font(.system(size: 12.5)).foregroundStyle(Theme.secondaryText)
+                SectionGrid(sections: report.sections, glow: .sage, badge: "Preview")
             } else if scan.error != nil {
                 EmptyState(symbol: "exclamationmark.triangle", text: "The check did not finish",
                            detail: scan.error ?? "", actionTitle: "Try again", action: scan.start)

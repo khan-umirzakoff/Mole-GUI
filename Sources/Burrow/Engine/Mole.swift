@@ -110,6 +110,8 @@ enum Mole {
             do { try p.run() } catch { cont.resume(throwing: error); return }
             let pid = p.processIdentifier
             track(pid: pid)
+            // Cancelled before launch: the cancellation handler already ran and found nothing.
+            if Task.isCancelled { signalTree(pid, SIGTERM) }
 
             // stderr is drained on its own queue so a chatty Mole can never block on a full pipe.
             let errGroup = DispatchGroup()

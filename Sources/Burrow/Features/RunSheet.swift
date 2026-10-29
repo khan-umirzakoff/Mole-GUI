@@ -59,7 +59,7 @@ struct RunSheet: View {
                         .keyboardShortcut(.defaultAction)
                 } else {
                     Button("Stop") { session.cancel() }.buttonStyle(.pillSecondary)
-                        .help("Stops Mole the way Ctrl-C would; Mole finishes the item it is on")
+                        .help("Stops Mole the way Ctrl-C would, so Mole cleans up after itself")
                 }
             }
         }

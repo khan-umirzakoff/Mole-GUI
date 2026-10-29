@@ -124,14 +124,16 @@ struct HeroCard<Actions: View>: View {
     var body: some View {
         GlowCard(glow: glow, style: .rim, padding: 26) {
             VStack(alignment: .leading, spacing: 14) {
+                // One fixed-height title row in every state, so the badge never pushes the value down.
                 HStack {
                     Text(label).cardTitle()
                     Spacer()
                     if scanning { ScanningBadge(started: started).transition(.blurFade) }
                 }
+                .frame(height: 28)
                 HStack(alignment: .bottom, spacing: 16) {
                     VStack(alignment: .leading, spacing: 12) {
-                        value.frame(height: 80, alignment: .bottomLeading)
+                        value.frame(minHeight: 84, alignment: .bottomLeading)
                         footnote
                     }
                     Spacer(minLength: 12)
@@ -139,7 +141,8 @@ struct HeroCard<Actions: View>: View {
                 }
             }
         }
-        .frame(height: 216)
+        .frame(minHeight: 216)
+        .fixedSize(horizontal: false, vertical: true)
         .animation(Motion.spring, value: scanning)
     }
 
@@ -207,6 +210,8 @@ struct Elapsed: View {
 struct SectionGrid: View {
     let sections: [ReportSection]
     var glow: Glow = .graphite
+    /// A tag on each card, for previews whose lines Mole words as if already done.
+    var badge: String?
 
     var body: some View {
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 18, alignment: .top), GridItem(.flexible(), spacing: 18, alignment: .top)],
@@ -220,6 +225,7 @@ struct SectionGrid: View {
                             if section.bytes > 0 {
                                 Text(section.bytes.bytesText).font(.system(size: 13, weight: .semibold)).monospacedDigit()
                             }
+                            if let badge { Tag(text: badge, color: Glow.blue.color) }
                         }
                         ForEach(section.items) { item in ReportRow(item: item) }
                     }

@@ -136,6 +136,22 @@ struct SessionTests {
         #expect(s.lines.contains { $0.contains("Touch ID") })
     }
 
+    /// Even when the app ignores INT/TERM/HUP, Mole must get default signals so Stop runs its
+    /// cleanup traps and exits on SIGINT, well before the SIGKILL fallback (137) at 4 s.
+    @Test func stopReachesMoleTrapsEvenIfTheAppIgnoresSignals() async {
+        for sig in [SIGINT, SIGTERM, SIGHUP] { signal(sig, SIG_IGN) }
+        defer { for sig in [SIGINT, SIGTERM, SIGHUP] { signal(sig, SIG_DFL) } }
+        let s = MoleSession(title: "Preview", args: ["uninstall", "--dry-run", "Steam"])
+        s.start()
+        try? await Task.sleep(for: .seconds(1.5))
+        let stopped = Date()
+        s.cancel()
+        await waitUntil(s, seconds: 6) { $0.isFinished }
+        #expect(s.isFinished)
+        #expect(Date().timeIntervalSince(stopped) < 3)
+        #expect(s.exitCode != 137)
+    }
+
     /// Slow (Mole scans the app's files): BURROW_SLOW_TESTS=1 swift test --filter uninstallPreview
     @Test(.enabled(if: ProcessInfo.processInfo.environment["BURROW_SLOW_TESTS"] != nil))
     func uninstallPreviewAsksAndCancels() async {
@@ -163,5 +179,51 @@ struct SessionTests {
         Mole.terminateAll()
         await waitUntil(s, seconds: 10) { $0.isFinished }
         #expect(s.isFinished)
+    }
+}
+
+struct TrashPolicyTests {
+    let home = "/Users/me"
+
+    @Test func neverOnTheWholeMacTour() {
+        #expect(!TrashPolicy.allows("/Users/me/Downloads", inside: nil, home: home))
+        #expect(!TrashPolicy.allows("/Users/me/Library", inside: nil, home: home))
+    }
+
+    @Test func neverTopLevelOrSystemFolders() {
+        #expect(!TrashPolicy.allows("/Users/me/Downloads", inside: "/Users/me", home: home))
+        #expect(!TrashPolicy.allows("/Users/me/Projects", inside: "/Users/me", home: home))
+        #expect(!TrashPolicy.allows("/Users/me/Library/Caches", inside: "/Users/me/Library", home: home))
+        #expect(!TrashPolicy.allows("/Users/me/.ssh/id_ed25519", inside: "/Users/me/.ssh", home: home))
+        #expect(!TrashPolicy.allows("/Applications/Arc.app", inside: "/Applications", home: home))
+    }
+
+    @Test func onlyDirectChildrenOfTheMappedFolder() {
+        #expect(TrashPolicy.allows("/Users/me/Downloads/big.dmg", inside: "/Users/me/Downloads", home: home))
+        #expect(TrashPolicy.allows("/Users/me/Library/Caches/com.foo", inside: "/Users/me/Library/Caches", home: home))
+        #expect(!TrashPolicy.allows("/Users/me/Downloads", inside: "/Users/me/Downloads", home: home))
+        #expect(!TrashPolicy.allows("/Users/me/Downloads/a/b", inside: "/Users/me/Downloads", home: home))
+        #expect(!TrashPolicy.allows("/Users/me/Downloads/../Documents/x", inside: "/Users/me/Downloads", home: home))
+    }
+}
+
+struct SettingsTests {
+    @Test func homeSpellings() {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        for entry in ["~", "~/", "$HOME", "${HOME}/", home, home + "/", home + "/."] {
+            #expect(ConfigList.isHome(entry), "\(entry)")
+        }
+        #expect(!ConfigList.isHome("~/PROJECTS"))
+    }
+
+    @Test func runningRunIsNotInterrupted() throws {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        let now = f.string(from: Date()), old = f.string(from: Date().addingTimeInterval(-7200))
+        let json = #"{"sessions":[{"command":"clean","started_at":"\#(now)","ended_at":""},{"command":"clean","started_at":"\#(old)","ended_at":""}]}"#
+        let s = try JSONDecoder().decode(HistoryResult.self, from: Data(json.utf8)).sessions ?? []
+        #expect(!s[0].looksInterrupted)
+        #expect(s[1].looksInterrupted)
     }
 }

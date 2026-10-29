@@ -7,6 +7,14 @@ struct ConfigList {
     static let whitelist = ConfigList(url: home(".config/mole/whitelist"))
     static let purgePaths = ConfigList(url: home(".config/mole/purge_paths"))
 
+    /// "~", "~/", "$HOME", "/Users/me/" and the like all name the home folder.
+    static func isHome(_ entry: String) -> Bool {
+        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+        let expanded = (entry.replacingOccurrences(of: "${HOME}", with: home).replacingOccurrences(of: "$HOME", with: home)
+                        as NSString).expandingTildeInPath
+        return URL(fileURLWithPath: expanded).standardizedFileURL.path == home
+    }
+
     static func home(_ path: String) -> URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(path)
     }
@@ -42,7 +50,7 @@ struct SettingsPage: View {
                              glow: .sage, entries: $whitelist) { ConfigList.whitelist.write($0) }
                 PathListCard(title: "Project scan folders",
                              caption: "Where Projects looks for build folders.",
-                             warning: purgePaths.contains { ["~", "~/", NSHomeDirectory()].contains($0) }
+                             warning: purgePaths.contains(where: ConfigList.isHome)
                                 ? "Your whole home folder is slow to scan and can time out. Project folders work best." : "",
                              glow: .blue, entries: $purgePaths) { ConfigList.purgePaths.write($0) }
             }
@@ -74,7 +82,7 @@ struct SettingsPage: View {
                 GlowCard(glow: .graphite, style: .plain) {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("About").cardTitle()
-                        Text("Burrow is a free, open-source window for Mole \(Mole.version), the macOS cleaner by tw93. Every change goes through Mole itself, with its safety checks and protection rules.").caption()
+                        Text("Burrow is a free, open-source window for Mole \(Mole.version), the macOS cleaner by tw93. Clean, Uninstall, Optimize, Slim and removing all build folders run through Mole with its safety checks. Installers, single build folders and Disk Map items you pick go to the Trash.").caption()
                         Text("Licensed GPL-3.0, like Mole.").caption()
                         Spacer(minLength: 0)
                         HStack {
@@ -94,7 +102,7 @@ struct SettingsPage: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Remove Burrow completely").cardTitle()
-                        Text("Moves the app to the Trash and deletes everything it and Mole keep on this Mac: ~/.config/mole, ~/.cache/mole, ~/Library/Logs/mole and the app's preferences.").caption()
+                        Text("Moves the app, its preferences and the files Mole keeps (~/.config/mole, ~/.cache/mole, ~/Library/Logs/mole) to the Trash. If Mole is also installed on its own, its files stay.").caption()
                     }
                     Spacer()
                     Button("Remove…") { askToRemoveApp() }.buttonStyle(.pillDanger)
@@ -117,27 +125,43 @@ struct SettingsPage: View {
     }
 
     private func askToRemoveApp() {
-        confirm = .init(title: "Remove Burrow and all its data?",
-                        message: "Mole's protection rules, scan folders, history and logs are deleted too. Files Mole already moved to the Trash stay there.",
+        let cli = Uninstaller.standaloneMole()
+        confirm = .init(title: "Remove Burrow?",
+                        message: cli.map { "Mole is also installed at \($0), so its protection rules, scan folders, history and logs stay. Burrow and its preferences go to the Trash." }
+                            ?? "Burrow, its preferences and Mole's protection rules, scan folders, history and logs go to the Trash. Files Mole already moved to the Trash stay there.",
                         button: "Remove") {
-            Uninstaller.removeEverything()
+            Uninstaller.removeEverything(keepMoleData: cli != nil)
         }
     }
 }
 
 enum Uninstaller {
-    /// Deletes Mole's state and the app's own preferences, then trashes the bundle and quits.
-    static func removeEverything() {
-        let fm = FileManager.default
-        for path in [".config/mole", ".cache/mole", "Library/Logs/mole",
-                     "Library/Saved Application State/\(Bundle.main.bundleIdentifier ?? "uz.khan.burrow").savedState"] {
-            try? fm.removeItem(at: ConfigList.home(path))
+    /// A Mole installed outside Burrow (Homebrew, the install script) shares ~/.config/mole.
+    static func standaloneMole() -> String? {
+        let path = ProcessInfo.processInfo.environment["PATH"] ?? ""
+        let dirs = path.split(separator: ":").map(String.init)
+            + ["/opt/homebrew/bin", "/usr/local/bin", ConfigList.home(".local/bin").path]
+        for dir in dirs {
+            for name in ["mo", "mole"] {
+                let candidate = (dir as NSString).appendingPathComponent(name)
+                if FileManager.default.isExecutableFile(atPath: candidate),
+                   !candidate.hasPrefix(Bundle.main.bundlePath) { return candidate }
+            }
         }
-        if let id = Bundle.main.bundleIdentifier {
-            UserDefaults.standard.removePersistentDomain(forName: id)
-            try? fm.removeItem(at: ConfigList.home("Library/Preferences/\(id).plist"))
-            try? fm.removeItem(at: ConfigList.home("Library/Caches/\(id)"))
-            try? fm.removeItem(at: ConfigList.home("Library/HTTPStorages/\(id)"))
+        return nil
+    }
+
+    /// Moves Burrow's (and, unless another Mole shares them, Mole's) files to the Trash, then
+    /// trashes the bundle and quits. The Trash keeps it all recoverable.
+    static func removeEverything(keepMoleData: Bool) {
+        let fm = FileManager.default
+        let id = Bundle.main.bundleIdentifier ?? "uz.khan.burrow"
+        var paths = ["Library/Saved Application State/\(id).savedState", "Library/Preferences/\(id).plist",
+                     "Library/Caches/\(id)", "Library/HTTPStorages/\(id)"]
+        if !keepMoleData { paths += [".config/mole", ".cache/mole", "Library/Logs/mole"] }
+        UserDefaults.standard.removePersistentDomain(forName: id)
+        for path in paths where fm.fileExists(atPath: ConfigList.home(path).path) {
+            try? fm.trashItem(at: ConfigList.home(path), resultingItemURL: nil)
         }
         if Bundle.main.bundleURL.pathExtension == "app" {
             try? fm.trashItem(at: Bundle.main.bundleURL, resultingItemURL: nil)

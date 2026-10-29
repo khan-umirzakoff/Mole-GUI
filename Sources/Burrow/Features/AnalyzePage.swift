@@ -102,6 +102,38 @@ final class DiskMap: ObservableObject {
     }
 }
 
+/// Which Disk Map items may be moved to the Trash. Only a real item directly inside the folder
+/// being mapped, inside the home folder, and never one of the folders macOS and apps rely on.
+enum TrashPolicy {
+    /// Folders whose direct children belong to macOS and apps (caches, settings, keys): only items
+    /// at least one level further down may go.
+    static let systemish: Set<String> = ["Library", ".config", ".local", ".cache"]
+    /// Never touched at any depth.
+    static let never: Set<String> = [".ssh", ".gnupg", ".Trash"]
+
+    static func allows(_ path: String, inside current: String?, home: String) -> Bool {
+        guard let current else { return false } // the whole-Mac tour lists summaries, not items
+        let item = URL(fileURLWithPath: path).standardizedFileURL
+        let folder = URL(fileURLWithPath: current).standardizedFileURL
+        let homeURL = URL(fileURLWithPath: home).standardizedFileURL
+        // Directly inside the mapped folder (Mole lists its children), and inside the home folder.
+        guard item.deletingLastPathComponent().path == folder.path,
+              item.path.hasPrefix(homeURL.path + "/") else { return false }
+        let inHome = Array(item.pathComponents.dropFirst(homeURL.pathComponents.count))
+        // Top-level home folders (Documents, Downloads, Projects…) hold everything else.
+        guard inHome.count >= 2, !never.contains(inHome[0]) else { return false }
+        return !systemish.contains(inHome[0]) || inHome.count >= 3
+    }
+}
+
+/// One treemap tile: a real entry, or the folded "N more" tile.
+struct MapTile: Identifiable {
+    let id: String
+    let name: String
+    let size: Int64
+    let entry: AnalyzeResult.Entry?
+}
+
 struct AnalyzePage: View {
     @ObservedObject var map: DiskMap
     @ViewState private var confirm: ConfirmAction?
@@ -113,7 +145,22 @@ struct AnalyzePage: View {
     ]
 
     private var entries: [AnalyzeResult.Entry] {
-        Array((map.result?.entries ?? []).filter { $0.size > 0 }.sorted { $0.size > $1.size }.prefix(30))
+        (map.result?.entries ?? []).filter { $0.size > 0 }.sorted { $0.size > $1.size }
+    }
+
+    /// The whole-Mac tour: overlapping places and summaries, shown as lists, never as one map.
+    private var isOverview: Bool { map.result?.overview ?? false }
+
+    /// Treemap tiles: everything at least 1.5% of the folder, the rest folded into one "Other" tile.
+    private var tiles: [MapTile] {
+        let total = entries.map(\.size).reduce(0, +)
+        let big = entries.prefix(28).filter { Double($0.size) >= Double(total) * 0.015 }
+        let rest = entries.dropFirst(big.count)
+        var out = big.map { MapTile(id: $0.id, name: $0.name, size: $0.size, entry: $0) }
+        if !rest.isEmpty {
+            out.append(MapTile(id: "other", name: "\(rest.count) more", size: rest.map(\.size).reduce(0, +), entry: nil))
+        }
+        return out
     }
 
     var body: some View {
@@ -134,41 +181,114 @@ struct AnalyzePage: View {
 
             breadcrumb
 
-            GlowCard(glow: .blue, style: .plain, padding: 10) {
-                GeometryReader { geo in
-                    let rects = Treemap.layout(entries.map { Double($0.size) }, in: CGRect(origin: .zero, size: geo.size))
-                    ZStack(alignment: .topLeading) {
-                        ForEach(Array(entries.enumerated()), id: \.element.id) { i, entry in
-                            tile(entry, index: i, rect: rects[i])
+            if isOverview, !map.loading, map.error == nil {
+                overview
+            } else {
+                GlowCard(glow: .blue, style: .plain, padding: 10) {
+                    GeometryReader { geo in
+                        let tiles = tiles
+                        let rects = Treemap.layout(tiles.map { Double($0.size) }, in: CGRect(origin: .zero, size: geo.size))
+                        ZStack(alignment: .topLeading) {
+                            ForEach(Array(tiles.enumerated()), id: \.element.id) { i, t in
+                                tile(t, index: i, rect: rects[i])
+                            }
                         }
                     }
-                }
-                .animation(Motion.spring, value: entries)
-                .overlay {
-                    if map.loading {
-                        VStack(spacing: 10) {
-                            ProgressView().tint(.white)
-                            Text("Mole is measuring \(currentName)…").font(.system(size: 13, weight: .medium))
-                            HStack(spacing: 4) { Text("Large folders take a minute ·"); Elapsed(since: map.startedAt) }.caption()
+                    .animation(Motion.spring, value: tiles.map(\.id))
+                    .overlay {
+                        if map.loading {
+                            VStack(spacing: 10) {
+                                ProgressView().tint(.white)
+                                Text("Mole is measuring \(currentName)…").font(.system(size: 13, weight: .medium))
+                                HStack(spacing: 4) { Text("Large folders take a minute ·"); Elapsed(since: map.startedAt) }.caption()
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(.black.opacity(0.55)))
+                            .transition(.opacity)
+                        } else if let error = map.error {
+                            EmptyState(symbol: "exclamationmark.triangle", text: "Mole could not map \(currentName)", detail: error,
+                                       actionTitle: "Try again", action: map.reload)
+                        } else if entries.isEmpty {
+                            EmptyState(symbol: "square.grid.3x3", text: map.result == nil ? "Pick a place above to map it." : "This folder is empty.")
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(.black.opacity(0.55)))
-                        .transition(.opacity)
-                    } else if let error = map.error {
-                        EmptyState(symbol: "exclamationmark.triangle", text: "Mole could not map \(currentName)", detail: error,
-                                   actionTitle: "Try again", action: map.reload)
-                    } else if entries.isEmpty {
-                        EmptyState(symbol: "square.grid.3x3", text: map.result == nil ? "Pick a place above to map it." : "This folder is empty.")
                     }
+                    .animation(Motion.quick, value: map.loading)
                 }
-                .animation(Motion.quick, value: map.loading)
-            }
-            .frame(height: 460)
+                .frame(height: 460)
 
-            if !entries.isEmpty { list }
+                if !entries.isEmpty, !map.loading { list }
+            }
         }
         .confirmation($confirm)
         .onAppear { if map.result == nil, !map.loading, map.error == nil { map.reload() } }
+    }
+
+    // MARK: - Whole-Mac overview
+
+    private var overview: some View {
+        let placesList = entries.filter { !$0.isInsight }
+        let insights = entries.filter(\.isInsight)
+        return VStack(alignment: .leading, spacing: 18) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 14)], spacing: 14) {
+                ForEach(Array(placesList.enumerated()), id: \.element.id) { i, entry in
+                    Button { map.open(entry.path) } label: {
+                        GlowCard(glow: [Glow.blue, .violet, .magenta, .sage][i % 4], style: .core, padding: 18) {
+                            VStack(alignment: .leading, spacing: 12) {
+                                HStack {
+                                    Text(entry.name).cardTitle()
+                                    Spacer()
+                                    Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .bold)).foregroundStyle(.black)
+                                        .frame(width: 26, height: 26).background(Circle().fill(.white))
+                                }
+                                MetricValue(value: entry.size.metric.value, unit: entry.size.metric.unit, dot: 3.6)
+                                Text((entry.path as NSString).abbreviatingWithTildeInPath).caption().lineLimit(1)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .hoverLift()
+                    .contextMenu { menu(for: entry) }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityAddTraits(.isButton)
+                }
+            }
+            Label("These places overlap (your Home includes your Library and Downloads), so their sizes do not add up.",
+                  systemImage: "info.circle").font(.system(size: 12)).foregroundStyle(Theme.secondaryText)
+
+            if !insights.isEmpty {
+                GlowCard(glow: .graphite, style: .plain, padding: 18) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Worth a look").cardTitle()
+                        ForEach(insights) { entry in
+                            HStack(spacing: 12) {
+                                Image(systemName: entry.cleanable == true ? "sparkles" : "eye")
+                                    .foregroundStyle(entry.cleanable == true ? Theme.accent : Glow.blue.color).frame(width: 18)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(entry.name).font(.system(size: 13))
+                                    Text((entry.path as NSString).abbreviatingWithTildeInPath).font(.system(size: 11)).foregroundStyle(Theme.tertiaryText)
+                                }
+                                Spacer()
+                                if entry.cleanable == true { Tag(text: "Clean can remove", color: Theme.accent) }
+                                Text(entry.size > 0 ? entry.size.bytesText : "–")
+                                    .font(.system(size: 12.5, design: .monospaced)).frame(width: 84, alignment: .trailing)
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture { map.open(entry.path) }
+                            .contextMenu { menu(for: entry) }
+                            .accessibilityElement(children: .combine)
+                        }
+                    }
+                }
+            }
+        }
+        .transition(.blurFade)
+    }
+
+    /// Used space of the startup volume, the honest total for the whole-Mac view.
+    private static var usedOnDisk: Int64? {
+        let v = try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey])
+        guard let total = v?.volumeTotalCapacity, let free = v?.volumeAvailableCapacityForImportantUsage else { return nil }
+        return Int64(total) - free
     }
 
     private var currentName: String {
@@ -189,46 +309,53 @@ struct AnalyzePage: View {
                 .foregroundStyle(i == map.trail.count - 1 ? .white : Theme.secondaryText)
             }
             Spacer()
-            if let total = map.result?.entries?.map(\.size).reduce(0, +), total > 0 {
+            if isOverview {
+                if let used = Self.usedOnDisk { Text("\(used.bytesText) used on this Mac").font(.system(size: 13, weight: .semibold)) }
+            } else if let total = map.result?.entries?.map(\.size).reduce(0, +), total > 0 {
                 Text(total.bytesText).font(.system(size: 13, weight: .semibold))
             }
         }
         .font(.system(size: 13))
     }
 
-    private func tile(_ entry: AnalyzeResult.Entry, index: Int, rect: CGRect) -> some View {
-        let glow = [Glow.blue, .violet, .magenta, .ember, .sage][index % 5]
+    private func tile(_ t: MapTile, index: Int, rect: CGRect) -> some View {
+        let glow = t.entry == nil ? Glow.graphite : [Glow.blue, .violet, .magenta, .ember, .sage][index % 5]
         let big = rect.width > 90 && rect.height > 50
+        let medium = rect.width > 56 && rect.height > 30
         return Button {
-            if entry.isDirectory { map.open(entry.path) }
+            if let e = t.entry, e.isDirectory { map.open(e.path) }
         } label: {
             ZStack(alignment: .bottomLeading) {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(RadialGradient(colors: [glow.color.opacity(hovered == entry.id ? 0.95 : 0.7), glow.color.opacity(0.18)],
+                    .fill(RadialGradient(colors: [glow.color.opacity(hovered == t.id ? 0.95 : 0.7), glow.color.opacity(0.18)],
                                          center: .bottomTrailing, startRadius: 0, endRadius: max(rect.width, rect.height)))
-                RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(0.14))
+                RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(hovered == t.id ? 0.4 : 0.14))
                 if big {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(entry.name).font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
-                        Text(entry.size.bytesText).font(.system(size: 11)).foregroundStyle(.white.opacity(0.75))
+                        Text(t.name).font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
+                        Text(t.size.bytesText).font(.system(size: 11)).foregroundStyle(.white.opacity(0.75))
                     }
                     .padding(10)
+                } else if medium {
+                    Text(t.name).font(.system(size: 10.5, weight: .medium)).lineLimit(1).padding(7)
                 }
             }
         }
         .buttonStyle(.plain)
         .frame(width: max(rect.width - 4, 0), height: max(rect.height - 4, 0))
         .offset(x: rect.minX + 2, y: rect.minY + 2)
-        .onHover { hovered = $0 ? entry.id : (hovered == entry.id ? nil : hovered) }
-        .help("\(entry.name) — \(entry.size.bytesText)")
-        .contextMenu { menu(for: entry) }
+        .onHover { hovered = $0 ? t.id : (hovered == t.id ? nil : hovered) }
+        .animation(Motion.quick, value: hovered == t.id)
+        .help("\(t.name) — \(t.size.bytesText)")
+        .contextMenu { if let e = t.entry { menu(for: e) } }
+        .accessibilityLabel("\(t.name), \(t.size.bytesText)")
     }
 
     private var list: some View {
         let top = Double(entries.first?.size ?? 1)
         return GlowCard(glow: .graphite, style: .plain, padding: 18) {
             VStack(spacing: 10) {
-                ForEach(entries) { entry in
+                ForEach(entries.prefix(40)) { entry in
                     HStack(spacing: 12) {
                         Image(systemName: entry.isDirectory ? "folder.fill" : "doc.fill")
                             .foregroundStyle(entry.isDirectory ? Glow.blue.color : Theme.secondaryText).frame(width: 18)
@@ -248,8 +375,9 @@ struct AnalyzePage: View {
     @ViewBuilder private func menu(for entry: AnalyzeResult.Entry) -> some View {
         if entry.isDirectory { Button("Open") { map.open(entry.path) } }
         Button("Show in Finder") { NSWorkspace.shared.selectFile(entry.path, inFileViewerRootedAtPath: "") }
-        // Only the user's own files: system folders and apps have their own, safer tools.
-        if entry.path.hasPrefix(FileManager.default.homeDirectoryForCurrentUser.path + "/") {
+        if !isOverview, !entry.isInsight,
+           TrashPolicy.allows(entry.path, inside: map.current, home: FileManager.default.homeDirectoryForCurrentUser.path),
+           FileManager.default.fileExists(atPath: entry.path) {
             Divider()
             Button("Move to Trash…", role: .destructive) {
                 confirm = .init(title: "Move \(entry.name) to the Trash?",
