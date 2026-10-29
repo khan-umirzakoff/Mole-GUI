@@ -97,9 +97,11 @@ final class MoleSession: ObservableObject, Identifiable {
         guard pid > 0, !isFinished else { return }
         write("\u{1B}")
         Mole.signalTree(pid, SIGINT)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            guard let self, !self.isFinished else { return }
-            Mole.signalTree(self.pid, SIGTERM)
+        for (delay, sig) in [(1.5, SIGTERM), (4.0, SIGKILL)] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, !self.isFinished else { return }
+                Mole.signalTree(self.pid, sig)
+            }
         }
     }
 

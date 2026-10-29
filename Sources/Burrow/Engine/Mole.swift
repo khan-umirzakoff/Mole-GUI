@@ -51,17 +51,29 @@ enum Mole {
     static func track(pid: pid_t) { liveLock.withLock { _ = livePIDs.insert(pid) } }
     static func untrack(pid: pid_t) { liveLock.withLock { _ = livePIDs.remove(pid) } }
 
+    /// Stops every Mole process the app started, for good: Burrow is going away and nothing
+    /// may keep running (or keep waiting at a prompt) without it. Interactive Mole scripts trap
+    /// TERM and HUP, so whatever survives a short grace period is killed.
     static func terminateAll() {
-        let pids = liveLock.withLock { livePIDs }
-        pids.forEach { signalTree($0, SIGTERM) }
+        let roots = liveLock.withLock { livePIDs }
+        // Collect the whole tree first: children move to launchd once their parent is gone.
+        let all = roots.flatMap(tree)
+        guard !all.isEmpty else { return }
+        all.forEach { kill($0, SIGHUP); kill($0, SIGTERM) }
+        usleep(400_000)
+        all.forEach { if kill($0, 0) == 0 { kill($0, SIGKILL) } }
     }
 
     /// Sends a signal to a process and everything it started. Mole is a shell script that
     /// runs helpers (`find`, `du`, the Go binaries); stopping only the shell would orphan them.
     static func signalTree(_ pid: pid_t, _ signal: Int32) {
-        guard pid > 0 else { return }
-        for child in children(of: pid) { signalTree(child, signal) }
-        kill(pid, signal)
+        tree(pid).forEach { kill($0, signal) }
+    }
+
+    /// A process and all its descendants, deepest first.
+    private static func tree(_ pid: pid_t) -> [pid_t] {
+        guard pid > 0 else { return [] }
+        return children(of: pid).flatMap(tree) + [pid]
     }
 
     private static func children(of pid: pid_t) -> [pid_t] {

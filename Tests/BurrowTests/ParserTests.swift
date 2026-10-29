@@ -153,4 +153,15 @@ struct SessionTests {
         await waitUntil(s, seconds: 20) { $0.isFinished }
         #expect(s.isFinished)
     }
+
+    /// Quitting Burrow must not leave Mole waiting at a prompt (Mole traps TERM and HUP).
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["BURROW_SLOW_TESTS"] != nil))
+    func quittingStopsASessionAtAPrompt() async {
+        let s = MoleSession(title: "Preview", args: ["uninstall", "--dry-run", "Steam"])
+        s.start()
+        await waitUntil(s, seconds: 240) { if case .needsAnswer = $0.phase { return true }; return $0.isFinished }
+        Mole.terminateAll()
+        await waitUntil(s, seconds: 10) { $0.isFinished }
+        #expect(s.isFinished)
+    }
 }
