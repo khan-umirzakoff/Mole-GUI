@@ -27,6 +27,21 @@ checks, protection rules and Trash-first deletes stay in charge.
 | History | `mo history --json` | Every run and what it changed |
 | Settings | config files, `mo touchid` | Protected paths, project scan folders, Touch ID for sudo, full removal |
 
+Every scan is a Mole dry run that keeps going while you look at other pages; the sidebar marks
+the pages still working, and the page shows what Mole has found so far.
+
+### Keyboard
+
+| Keys | Does |
+|---|---|
+| ⌘1 … ⌘9, ⌘, | Go to a page |
+| ⌘R | Scan again (or stop the running scan) |
+| ⌘F | Search apps (Uninstall) |
+| Esc | Clear the selection |
+| Return | Answer the highlighted choice in a Mole prompt |
+
+`Burrow -startPage clean` opens a page directly, which helps when taking screenshots.
+
 ## Install
 
 Download `Burrow.zip` from [Releases](../../releases), unzip, move `Burrow.app` to Applications.
@@ -52,6 +67,7 @@ Only the Xcode Command Line Tools are needed (no Xcode):
 ```bash
 swift test
 scripts/bundle.sh     # → build/Burrow.app
+BURROW_SLOW_TESTS=1 swift test --filter uninstallPreview   # drives a real Mole dry run in a terminal
 ```
 
 The Mole engine is vendored in `Vendor/mole` (version in `Vendor/mole/VERSION`). To update it,

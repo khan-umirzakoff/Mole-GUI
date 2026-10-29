@@ -67,6 +67,18 @@ struct MetricValue: View {
     var live = false
 
     var body: some View {
+        // Narrow cards (the minimum window size) get smaller dots instead of clipped digits.
+        ViewThatFits(in: .horizontal) {
+            row(dot)
+            row(dot * 0.8)
+            row(dot * 0.62)
+        }
+        .animation(live ? nil : Motion.spring, value: value)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(unit.isEmpty ? value : "\(value) \(unit)")
+    }
+
+    private func row(_ dot: CGFloat) -> some View {
         HStack(alignment: .lastTextBaseline, spacing: 8) {
             if live {
                 DotMatrixText(text: value, dot: dot)
@@ -77,12 +89,9 @@ struct MetricValue: View {
             }
             if !unit.isEmpty {
                 Text(unit).font(.system(size: max(11, dot * 3), weight: .regular)).foregroundStyle(Theme.secondaryText)
-                    .lineLimit(1)
+                    .lineLimit(1).fixedSize()
             }
         }
-        .animation(live ? nil : Motion.spring, value: value)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(unit.isEmpty ? value : "\(value) \(unit)")
     }
 }
 

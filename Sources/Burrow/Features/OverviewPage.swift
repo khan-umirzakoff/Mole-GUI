@@ -20,7 +20,9 @@ final class StatusMonitor: ObservableObject {
             } catch {
                 if !Task.isCancelled { self?.failed = error.localizedDescription }
             }
-            self?.task = nil
+            // A stopped stream was already replaced or cleared by stop(); only a stream that
+            // ended on its own clears the slot, so a quick restart is never forgotten.
+            if !Task.isCancelled { self?.task = nil }
         }
     }
 
