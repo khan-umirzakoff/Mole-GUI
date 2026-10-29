@@ -6,26 +6,42 @@ struct RootView: View {
     var body: some View {
         HStack(spacing: 0) {
             Sidebar()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    PageHeader(page: model.page)
-                    content
+            // A ZStack, so the old and new page overlap while they cross-fade instead of
+            // sharing the width side by side.
+            ZStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        PageHeader(page: model.page)
+                        content
+                    }
+                    .padding(.horizontal, 36)
+                    .padding(.top, 40)
+                    .padding(.bottom, 40)
+                    .frame(maxWidth: 1400, alignment: .leading)
+                    .frame(maxWidth: .infinity)
                 }
-                .padding(.horizontal, 36)
-                .padding(.top, 40)
-                .padding(.bottom, 48)
-                .frame(maxWidth: 1400, alignment: .leading)
-                .frame(maxWidth: .infinity)
+                .scrollIndicators(.automatic)
+                .overlayPreferenceValue(BottomBarKey.self, alignment: .bottom) { bar in
+                    ZStack {
+                        if let bar {
+                            bar.view
+                                .frame(maxWidth: 1000)
+                                .padding(.horizontal, 36)
+                                .padding(.bottom, 20)
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
+                    }
+                    .animation(Motion.spring, value: bar != nil)
+                }
+                .id(model.page)
+                .transition(.blurFade)
             }
-            .scrollIndicators(.never)
-            .id(model.page)
-            .transition(.blurFade)
+            .animation(Motion.page, value: model.page)
         }
         .background(AmbientBackground(tint: model.page.glow))
-        .sheet(item: $model.session) { session in
+        .sheet(item: $model.session, onDismiss: model.sessionDismissed) { session in
             RunSheet(session: session)
         }
-        .animation(Motion.spring, value: model.page)
     }
 
     @ViewBuilder private var content: some View {
@@ -71,7 +87,8 @@ struct Sidebar: View {
 
             ForEach(Page.allCases) { page in
                 if page == .history { Spacer(minLength: 18) }
-                SidebarItem(page: page, selected: model.page == page, namespace: selection) {
+                SidebarItem(page: page, selected: model.page == page, busy: model.busy.contains(page),
+                            namespace: selection) {
                     model.page = page
                 }
             }
@@ -91,6 +108,7 @@ struct Sidebar: View {
 private struct SidebarItem: View {
     let page: Page
     let selected: Bool
+    let busy: Bool
     let namespace: Namespace.ID
     let action: () -> Void
     @ViewState private var hover = false
@@ -102,6 +120,10 @@ private struct SidebarItem: View {
                     .symbolEffect(.bounce, value: selected)
                 Text(page.title).font(.system(size: 14, weight: selected ? .semibold : .regular))
                 Spacer()
+                if busy {
+                    ProgressView().controlSize(.mini).tint(selected ? .black : .white)
+                        .transition(.scale.combined(with: .opacity))
+                }
             }
             .padding(.horizontal, 12)
             .frame(height: 36)
@@ -118,6 +140,10 @@ private struct SidebarItem: View {
         .buttonStyle(.plain)
         .onHover { hover = $0 }
         .animation(Motion.spring, value: selected)
+        .animation(Motion.quick, value: busy)
+        .help("\(page.title)  ⌘\(page.shortcut.character)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityValue(busy ? "Scanning" : "")
     }
 }
 

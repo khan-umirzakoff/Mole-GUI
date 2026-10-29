@@ -1,24 +1,22 @@
 import SwiftUI
 
+/// Installed apps as Mole sees them. Sizes come from Mole's own list (it caches them),
+/// so nothing is measured twice and the grid is ready as soon as the list is.
 @MainActor
 final class AppCatalog: ObservableObject {
     @Published var apps: [InstalledApp] = []
-    @Published var sizes: [String: Int64] = [:]
     @Published var loading = false
+    @Published var error: String?
 
     func load() async {
+        guard !loading else { return }
         loading = true
+        error = nil
         defer { loading = false }
-        apps = (try? await Mole.json([InstalledApp].self, ["uninstall", "--list"])) ?? []
-        let paths = apps.map(\.path)
-        for chunk in stride(from: 0, to: paths.count, by: 8).map({ Array(paths[$0..<min($0 + 8, paths.count)]) }) {
-            let measured = await withTaskGroup(of: (String, Int64).self) { group in
-                for p in chunk { group.addTask { (p, FolderSize.of(p)) } }
-                var out: [(String, Int64)] = []
-                for await r in group { out.append(r) }
-                return out
-            }
-            for (p, s) in measured { sizes[p] = s }
+        do {
+            apps = try await Mole.json([InstalledApp].self, ["uninstall", "--list"])
+        } catch {
+            self.error = error.localizedDescription
         }
     }
 }
@@ -45,72 +43,97 @@ struct UninstallPage: View {
     @ObservedObject var catalog: AppCatalog
     @ViewState private var query = ""
     @ViewState private var selected = Set<String>()
-    @ViewState private var sortBySize = true
+    @AppStorage("uninstall.sortBySize") private var sortBySize = true
     @AppStorage("uninstall.withData") private var withData = false
     @AppStorage("uninstall.permanent") private var permanent = false
     @ViewState private var confirm: ConfirmAction?
+    @FocusState private var searchFocused: Bool
 
     private var visible: [InstalledApp] {
         let list = catalog.apps.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }
-        return sortBySize ? list.sorted { (catalog.sizes[$0.path] ?? 0) > (catalog.sizes[$1.path] ?? 0) }
+        return sortBySize ? list.sorted { ($0.bytes ?? 0) > ($1.bytes ?? 0) }
                           : list.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
     private var chosen: [InstalledApp] { catalog.apps.filter { selected.contains($0.path) } }
-    private var chosenBytes: Int64 { chosen.map { catalog.sizes[$0.path] ?? 0 }.reduce(0, +) }
+    private var chosenBytes: Int64 { chosen.compactMap(\.bytes).reduce(0, +) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack(spacing: 12) {
-                SearchField(text: $query, prompt: "Search \(catalog.apps.count) apps")
-                Picker("", selection: $sortBySize) {
+                SearchField(text: $query, prompt: catalog.apps.isEmpty ? "Search apps" : "Search \(catalog.apps.count) apps",
+                            focused: $searchFocused)
+                Picker("Sort", selection: $sortBySize) {
                     Text("Largest").tag(true)
                     Text("A–Z").tag(false)
                 }
+                .labelsHidden()
                 .pickerStyle(.segmented).frame(width: 160)
-                CircleIconButton(symbol: "arrow.clockwise", help: "Reload") { Task { await catalog.load() } }
+                CircleIconButton(symbol: "arrow.clockwise", help: "Reload the app list") { Task { await catalog.load() } }
+                    .keyboardShortcut("r", modifiers: .command)
+                    .disabled(catalog.loading)
+                Button("Search") { searchFocused = true }.keyboardShortcut("f", modifiers: .command)
+                    .opacity(0).frame(width: 0, height: 0).accessibilityHidden(true)
             }
 
             if catalog.apps.isEmpty {
-                EmptyState(symbol: catalog.loading ? "hourglass" : "app.dashed",
-                           text: catalog.loading ? "Finding your apps…" : "No apps found.")
+                if let error = catalog.error {
+                    EmptyState(symbol: "exclamationmark.triangle", text: "Mole could not list your apps", detail: error,
+                               actionTitle: "Try again") { Task { await catalog.load() } }
+                } else if catalog.loading {
+                    skeleton
+                } else {
+                    EmptyState(symbol: "app.dashed", text: "No apps found.")
+                }
+            } else if visible.isEmpty {
+                EmptyState(symbol: "magnifyingglass", text: "No app matches “\(query)”.", actionTitle: "Clear search") { query = "" }
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 14)], spacing: 14) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 14)], spacing: 14) {
                     ForEach(visible) { app in
-                        AppTile(app: app, size: catalog.sizes[app.path], selected: selected.contains(app.path)) {
+                        AppTile(app: app, selected: selected.contains(app.path)) {
                             if selected.contains(app.path) { selected.remove(app.path) } else { selected.insert(app.path) }
                         }
                     }
                 }
+                .animation(Motion.spring, value: sortBySize)
+                .animation(Motion.quick, value: query)
+                Text("Sizes are the app bundles as Mole measured them. Leftovers are listed in the preview.").caption()
             }
         }
-        .padding(.bottom, selected.isEmpty ? 0 : 90)
-        .overlay(alignment: .bottom) {
-            if !selected.isEmpty { actionBar.transition(.move(edge: .bottom).combined(with: .opacity)) }
-        }
-        .animation(.snappy, value: selected.isEmpty)
+        .bottomBar(!selected.isEmpty) { actionBar }
         .confirmation($confirm)
-        .task { if catalog.apps.isEmpty { await catalog.load() } }
+        // Not `.task`: leaving the page must not cancel Mole half way through the list.
+        .onAppear { if catalog.apps.isEmpty { Task { await catalog.load() } } }
+    }
+
+    /// Placeholder tiles while Mole lists the apps (it takes a few seconds the first time).
+    private var skeleton: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 14)], spacing: 14) {
+            ForEach(0..<12, id: \.self) { _ in
+                RoundedRectangle(cornerRadius: 20, style: .continuous).fill(.white.opacity(0.045))
+                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Theme.hairline))
+                    .frame(height: 64)
+                    .shimmer()
+            }
+        }
+        .accessibilityLabel("Finding your apps")
     }
 
     private var actionBar: some View {
-        GlowCard(glow: .ember, style: .core, padding: 16) {
-            HStack(spacing: 16) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(chosen.count) selected · \(chosenBytes.bytesText)").font(.system(size: 14, weight: .semibold))
-                    Text(chosen.prefix(3).map(\.name).joined(separator: ", ") + (chosen.count > 3 ? "…" : "")).caption()
-                }
-                Spacer()
-                Toggle("Personal data too", isOn: $withData).toggleStyle(.switch).controlSize(.small)
-                Toggle("Skip Trash", isOn: $permanent).toggleStyle(.switch).controlSize(.small)
-                Button("Preview") {
-                    model.run("Preview uninstall", ["uninstall", "--dry-run"] + flags + names)
-                }
-                .buttonStyle(.pillSecondary)
-                Button("Uninstall") { askToUninstall() }.buttonStyle(.pill)
+        SelectionBar(glow: .ember, title: "\(chosen.count) selected · \(chosenBytes.bytesText)",
+                     subtitle: chosen.prefix(3).map(\.name).joined(separator: ", ") + (chosen.count > 3 ? "…" : ""),
+                     clear: { selected.removeAll() }) {
+            Toggle("Personal data too", isOn: $withData).toggleStyle(.switch).controlSize(.small)
+                .help("Also remove the app's documents and settings Mole finds")
+            Toggle("Skip Trash", isOn: $permanent).toggleStyle(.switch).controlSize(.small)
+                .help("Delete for good instead of moving to the Trash")
+            Button("Preview") {
+                model.run("Preview uninstall", ["uninstall", "--dry-run"] + flags + names)
             }
+            .buttonStyle(.pillSecondary)
+            .help("See every file Mole would remove, without removing anything")
+            Button("Uninstall") { askToUninstall() }.buttonStyle(.pill)
         }
-        .frame(height: 76)
     }
 
     private var names: [String] { chosen.map(\.uninstall_name) }
@@ -118,8 +141,8 @@ struct UninstallPage: View {
 
     private func askToUninstall() {
         confirm = .init(title: "Uninstall \(chosen.count) app\(chosen.count == 1 ? "" : "s")?",
-                        message: permanent ? "Apps and their leftovers are deleted for good." :
-                            "Apps and their leftovers go to the Trash, so you can still restore them.",
+                        message: permanent ? "Apps and their leftovers are deleted for good. Mole shows the full list and asks once more." :
+                            "Apps and their leftovers go to the Trash, so you can still restore them. Mole shows the full list and asks once more.",
                         button: "Uninstall") {
             model.run("Uninstalling", ["uninstall"] + flags + names) {
                 selected.removeAll()
@@ -131,32 +154,17 @@ struct UninstallPage: View {
 
 private struct AppTile: View {
     let app: InstalledApp
-    let size: Int64?
     let selected: Bool
     let toggle: () -> Void
-    @ViewState private var hover = false
 
     var body: some View {
-        Button(action: toggle) {
-            HStack(spacing: 12) {
-                AppIcon(path: app.path, size: 40)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(app.name).font(.system(size: 13.5, weight: .medium)).lineLimit(1)
-                    Text(size.map(\.bytesText) ?? "Measuring…").caption()
-                }
-                Spacer(minLength: 0)
-                CheckDot(on: selected)
+        SelectTile(selected: selected, glow: .ember, toggle: toggle) {
+            AppIcon(path: app.path, size: 40)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(app.name).font(.system(size: 13.5, weight: .medium)).lineLimit(1)
+                Text(app.bytes.map(\.bytesText) ?? "Size unknown").caption().monospacedDigit()
             }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(selected ? Glow.ember.color.opacity(0.22) : .white.opacity(hover ? 0.08 : 0.045)))
-            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(selected ? Glow.ember.color.opacity(0.7) : Theme.hairline))
-            .contentShape(RoundedRectangle(cornerRadius: 20))
         }
-        .buttonStyle(.plain)
-        .hoverLift(1.02)
-        .onHover { hover = $0 }
         .contextMenu {
             Button("Show in Finder") { NSWorkspace.shared.selectFile(app.path, inFileViewerRootedAtPath: "") }
             if let id = app.bundle_id { Text(id) }
@@ -167,19 +175,23 @@ private struct AppTile: View {
 struct SearchField: View {
     @Binding var text: String
     let prompt: String
+    var focused: FocusState<Bool>.Binding
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass").foregroundStyle(Theme.secondaryText)
-            TextField(prompt, text: $text).textFieldStyle(.plain)
+            TextField(prompt, text: $text).textFieldStyle(.plain).focused(focused)
+                .onExitCommand { text = "" }
             if !text.isEmpty {
                 Button { text = "" } label: { Image(systemName: "xmark.circle.fill") }
                     .buttonStyle(.plain).foregroundStyle(Theme.secondaryText)
+                    .accessibilityLabel("Clear search")
             }
         }
         .padding(.horizontal, 14)
         .frame(height: 38)
         .background(Capsule().fill(.white.opacity(0.07)))
-        .overlay(Capsule().strokeBorder(Theme.hairline))
+        .overlay(Capsule().strokeBorder(focused.wrappedValue ? .white.opacity(0.3) : Theme.hairline))
+        .help("Search (⌘F)")
     }
 }

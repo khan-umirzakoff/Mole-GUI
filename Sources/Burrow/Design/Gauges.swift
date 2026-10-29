@@ -22,7 +22,8 @@ struct ArcTicks: View {
                 }
             }
         }
-        .animation(.smooth(duration: 0.6), value: value)
+        .animation(Motion.reduced ? nil : .smooth(duration: 0.6), value: value)
+        .accessibilityHidden(true)
     }
 }
 
@@ -40,7 +41,8 @@ struct DotMeter: View {
                     .frame(width: 4, height: 4)
             }
         }
-        .animation(.smooth(duration: 0.5), value: value)
+        .animation(Motion.reduced ? nil : .smooth(duration: 0.5), value: value)
+        .accessibilityHidden(true)
     }
 }
 
@@ -62,18 +64,30 @@ struct BarSpark: View {
             }
             .frame(maxHeight: .infinity, alignment: .bottom)
         }
-        .animation(.smooth(duration: 0.4), value: values)
+        .animation(Motion.reduced ? nil : .smooth(duration: 0.4), value: values)
+        .accessibilityHidden(true)
     }
 }
 
-/// An app's icon from its bundle path.
+/// An app's icon from its bundle path. Icons are cached: grids redraw on every hover.
 struct AppIcon: View {
     let path: String
     var size: CGFloat = 36
 
+    nonisolated(unsafe) private static let cache = NSCache<NSString, NSImage>()
+
     var body: some View {
-        Image(nsImage: NSWorkspace.shared.icon(forFile: path))
+        Image(nsImage: Self.icon(path))
             .resizable()
+            .interpolation(.high)
             .frame(width: size, height: size)
+            .accessibilityHidden(true)
+    }
+
+    private static func icon(_ path: String) -> NSImage {
+        if let hit = cache.object(forKey: path as NSString) { return hit }
+        let image = NSWorkspace.shared.icon(forFile: path)
+        cache.setObject(image, forKey: path as NSString)
+        return image
     }
 }

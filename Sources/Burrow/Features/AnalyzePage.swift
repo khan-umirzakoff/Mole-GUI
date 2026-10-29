@@ -48,28 +48,57 @@ enum Treemap {
     }
 }
 
+/// Mole's size map of one folder at a time, with a trail for drilling down and back.
 @MainActor
 final class DiskMap: ObservableObject {
     @Published var trail: [String] = []
     @Published var result: AnalyzeResult?
     @Published var loading = false
+    @Published var error: String?
+    @Published private(set) var startedAt = Date()
+    var onBusyChange: ((Bool) -> Void)?
+    private var task: Task<Void, Never>?
 
     var current: String? { trail.last }
 
-    func open(_ path: String?) async {
+    /// Maps `path` below the current trail; `nil` maps the whole Mac.
+    func open(_ path: String?) {
         if let path { trail.append(path) } else { trail = [] }
-        await reload()
+        reload()
     }
 
-    func back(to index: Int) async {
+    /// Starts a fresh trail at a top-level place.
+    func jump(to path: String?) {
+        trail = path.map { [$0] } ?? []
+        reload()
+    }
+
+    func back(to index: Int) {
         trail = Array(trail.prefix(index + 1))
-        await reload()
+        reload()
     }
 
-    func reload() async {
+    /// Maps the current folder. A newer request replaces an older one still measuring.
+    func reload() {
+        task?.cancel()
+        let args = ["analyze", "--json"] + (current.map { [$0] } ?? [])
         loading = true
-        defer { loading = false }
-        result = try? await Mole.json(AnalyzeResult.self, ["analyze", "--json"] + (current.map { [$0] } ?? []))
+        error = nil
+        startedAt = Date()
+        onBusyChange?(true)
+        task = Task {
+            do {
+                let r = try await Mole.json(AnalyzeResult.self, args)
+                guard !Task.isCancelled else { return }
+                result = r
+            } catch {
+                guard !Task.isCancelled else { return }
+                result = nil
+                self.error = error.localizedDescription
+            }
+            loading = false
+            onBusyChange?(false)
+        }
     }
 }
 
@@ -92,11 +121,11 @@ struct AnalyzePage: View {
             ScrollView(.horizontal) {
                 HStack(spacing: 8) {
                     ForEach(places, id: \.0) { place in
-                        Button(place.0) {
-                            map.trail = []
-                            Task { await map.open(place.1.map { ($0 as NSString).expandingTildeInPath }) }
-                        }
-                        .buttonStyle(.pillSecondary)
+                        let path = place.1.map { ($0 as NSString).expandingTildeInPath }
+                        let active = map.trail.first == path || (path == nil && map.trail.isEmpty)
+                        Button(place.0) { map.jump(to: path) }
+                            .buttonStyle(active ? .pill : .pillSecondary)
+                            .accessibilityAddTraits(active ? .isSelected : [])
                     }
                     Button { choose() } label: { Label("Choose…", systemImage: "folder") }.buttonStyle(.pillSecondary)
                 }
@@ -119,30 +148,42 @@ struct AnalyzePage: View {
                     if map.loading {
                         VStack(spacing: 10) {
                             ProgressView().tint(.white)
-                            Text("Mole is measuring…").caption()
+                            Text("Mole is measuring \(currentName)…").font(.system(size: 13, weight: .medium))
+                            HStack(spacing: 4) { Text("Large folders take a minute ·"); Elapsed(since: map.startedAt) }.caption()
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(.black.opacity(0.5))
+                        .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(.black.opacity(0.55)))
+                        .transition(.opacity)
+                    } else if let error = map.error {
+                        EmptyState(symbol: "exclamationmark.triangle", text: "Mole could not map \(currentName)", detail: error,
+                                   actionTitle: "Try again", action: map.reload)
                     } else if entries.isEmpty {
-                        EmptyState(symbol: "square.grid.3x3", text: "Pick a place above to map it.")
+                        EmptyState(symbol: "square.grid.3x3", text: map.result == nil ? "Pick a place above to map it." : "This folder is empty.")
                     }
                 }
+                .animation(Motion.quick, value: map.loading)
             }
             .frame(height: 460)
 
             if !entries.isEmpty { list }
         }
         .confirmation($confirm)
-        .task { if map.result == nil { await map.open(nil) } }
+        .onAppear { if map.result == nil, !map.loading, map.error == nil { map.reload() } }
+    }
+
+    private var currentName: String {
+        guard let path = map.current else { return "this Mac" }
+        return (path as NSString).lastPathComponent.isEmpty ? path : (path as NSString).lastPathComponent
     }
 
     private var breadcrumb: some View {
         HStack(spacing: 6) {
-            Button("Overview") { Task { await map.open(nil) } }.buttonStyle(.plain).foregroundStyle(Theme.secondaryText)
+            Button("This Mac") { map.jump(to: nil) }.buttonStyle(.plain)
+                .foregroundStyle(map.trail.isEmpty ? .white : Theme.secondaryText)
             ForEach(Array(map.trail.enumerated()), id: \.offset) { i, path in
                 Image(systemName: "chevron.right").font(.system(size: 10)).foregroundStyle(Theme.tertiaryText)
                 Button((path as NSString).lastPathComponent.isEmpty ? path : (path as NSString).lastPathComponent) {
-                    Task { await map.back(to: i) }
+                    map.back(to: i)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(i == map.trail.count - 1 ? .white : Theme.secondaryText)
@@ -159,7 +200,7 @@ struct AnalyzePage: View {
         let glow = [Glow.blue, .violet, .magenta, .ember, .sage][index % 5]
         let big = rect.width > 90 && rect.height > 50
         return Button {
-            if entry.isDirectory { Task { await map.open(entry.path) } }
+            if entry.isDirectory { map.open(entry.path) }
         } label: {
             ZStack(alignment: .bottomLeading) {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -197,7 +238,7 @@ struct AnalyzePage: View {
                         Text(entry.size.bytesText).font(.system(size: 12.5, design: .monospaced)).frame(width: 84, alignment: .trailing)
                     }
                     .contentShape(Rectangle())
-                    .onTapGesture { if entry.isDirectory { Task { await map.open(entry.path) } } }
+                    .onTapGesture { if entry.isDirectory { map.open(entry.path) } }
                     .contextMenu { menu(for: entry) }
                 }
             }
@@ -205,15 +246,21 @@ struct AnalyzePage: View {
     }
 
     @ViewBuilder private func menu(for entry: AnalyzeResult.Entry) -> some View {
-        if entry.isDirectory { Button("Open") { Task { await map.open(entry.path) } } }
+        if entry.isDirectory { Button("Open") { map.open(entry.path) } }
         Button("Show in Finder") { NSWorkspace.shared.selectFile(entry.path, inFileViewerRootedAtPath: "") }
-        Divider()
-        Button("Move to Trash…", role: .destructive) {
-            confirm = .init(title: "Move \(entry.name) to the Trash?",
-                            message: "\(entry.size.bytesText) at \(entry.path). You can restore it from the Trash.",
-                            button: "Move to Trash") {
-                try? FileManager.default.trashItem(at: URL(fileURLWithPath: entry.path), resultingItemURL: nil)
-                Task { await map.reload() }
+        // Only the user's own files: system folders and apps have their own, safer tools.
+        if entry.path.hasPrefix(FileManager.default.homeDirectoryForCurrentUser.path + "/") {
+            Divider()
+            Button("Move to Trash…", role: .destructive) {
+                confirm = .init(title: "Move \(entry.name) to the Trash?",
+                                message: "\(entry.size.bytesText) at \((entry.path as NSString).abbreviatingWithTildeInPath). You can restore it from the Trash.",
+                                button: "Move to Trash") {
+                    if Trash.move([entry.path]).isEmpty {
+                        map.reload()
+                    } else {
+                        map.error = "\(entry.name) could not be moved to the Trash. It may belong to macOS or another user."
+                    }
+                }
             }
         }
     }
@@ -222,9 +269,6 @@ struct AnalyzePage: View {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
-        if panel.runModal() == .OK, let url = panel.url {
-            map.trail = []
-            Task { await map.open(url.path) }
-        }
+        if panel.runModal() == .OK, let url = panel.url { map.jump(to: url.path) }
     }
 }

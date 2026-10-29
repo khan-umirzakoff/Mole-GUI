@@ -46,7 +46,9 @@ final class MoleSession: ObservableObject, Identifiable {
     private var undecoded = Data()
     private var idleTask: Task<Void, Never>?
     private var typing = false
+    /// The prompt last answered; it is not asked again until Mole prints a new line.
     private var answeredPrompt = ""
+    let started = Date()
 
     init(title: String, args: [String], responders: [Responder] = []) {
         self.title = title
@@ -90,15 +92,19 @@ final class MoleSession: ObservableObject, Identifiable {
 
     func submitPassword(_ password: String) { reply(password + "\r") }
 
+    /// Asks Mole to stop the way Ctrl-C would, then insists if it is still running.
     func cancel() {
         guard pid > 0, !isFinished else { return }
         write("\u{1B}")
-        kill(pid, SIGINT)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [pid] in kill(pid, SIGTERM) }
+        Mole.signalTree(pid, SIGINT)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self, !self.isFinished else { return }
+            Mole.signalTree(self.pid, SIGTERM)
+        }
     }
 
     private func write(_ text: String) {
-        guard masterFD >= 0 else { return }
+        guard masterFD >= 0, !isFinished else { return }
         var bytes = Array(text.utf8)
         _ = bytes.withUnsafeMutableBytes { Darwin.write(masterFD, $0.baseAddress, $0.count) }
     }
@@ -127,6 +133,9 @@ final class MoleSession: ObservableObject, Identifiable {
                 let chunk = Data(buf[0..<n])
                 DispatchQueue.main.async { self?.ingest(chunk) }
             }
+            // The reader owns the descriptor: closing it here can never race a read.
+            DispatchQueue.main.sync { if self?.masterFD == fd { self?.masterFD = -1 } }
+            close(fd)
         }
     }
 
@@ -142,8 +151,6 @@ final class MoleSession: ObservableObject, Identifiable {
                 self.idleTask?.cancel()
                 self.live = ""
                 self.phase = .finished(code)
-                close(self.masterFD)
-                self.masterFD = -1
             }
         }
     }
@@ -166,6 +173,7 @@ final class MoleSession: ObservableObject, Identifiable {
     private func commit(_ raw: String) {
         let line = TerminalText.visible(raw)
         guard !line.isEmpty else { return }
+        answeredPrompt = ""
         if lines.last != line { lines.append(line) }
         if lines.count > 4000 { lines.removeFirst(lines.count - 4000) }
     }

@@ -4,7 +4,8 @@ import Foundation
 
 struct ReportItem: Identifiable, Hashable {
     enum Kind { case action, info, skipped, ok }
-    let id = UUID()
+    /// Position in Mole's output, so a re-parse of a growing output keeps the same identity.
+    let id: String
     let kind: Kind
     let name: String
     let detail: String
@@ -12,7 +13,7 @@ struct ReportItem: Identifiable, Hashable {
 }
 
 struct ReportSection: Identifiable, Hashable {
-    let id = UUID()
+    let id: String
     let title: String
     var items: [ReportItem]
     var bytes: Int64 { items.filter { $0.kind == .action }.compactMap(\.bytes).reduce(0, +) }
@@ -34,7 +35,8 @@ struct SectionReport {
             if line.hasPrefix("====") { inSummary.toggle(); continue }
             if inSummary { report.summary.append(line); continue }
             if line.hasPrefix("➤") {
-                report.sections.append(.init(title: String(line.dropFirst()).trimmingCharacters(in: .whitespaces), items: []))
+                let title = String(line.dropFirst()).trimmingCharacters(in: .whitespaces)
+                report.sections.append(.init(id: "\(report.sections.count)-\(title)", title: title, items: []))
                 continue
             }
             guard let icon = line.first else { continue }
@@ -64,8 +66,10 @@ struct SectionReport {
                 detail = ""
             }
             let bytes = detail.contains("protected") && detail.hasPrefix("0") ? nil : ByteSize.first(in: detail)
-            report.sections[report.sections.count - 1].items.append(
-                .init(kind: kind, name: name, detail: detail.replacingOccurrences(of: " dry", with: ""), bytes: bytes))
+            let last = report.sections.count - 1
+            report.sections[last].items.append(
+                .init(id: "\(last).\(report.sections[last].items.count)", kind: kind, name: name,
+                      detail: detail.replacingOccurrences(of: " dry", with: ""), bytes: bytes))
         }
         report.sections.removeAll { $0.items.isEmpty }
         return report
@@ -92,12 +96,16 @@ struct PurgeReport {
 
     var artifacts: [Artifact] = []
     var summary = ""
+    /// Mole's warnings, for example scan roots it had to skip.
+    var notes: [String] = []
     var bytes: Int64 { artifacts.map(\.bytes).reduce(0, +) }
 
     static func parse(_ output: String) -> PurgeReport {
         var report = PurgeReport()
         for line in TerminalText.lines(output) {
-            if let r = line.range(of: "[DRY RUN] ") {
+            if line.hasPrefix("◎ Skipped") {
+                report.notes.append(String(line.dropFirst()).trimmingCharacters(in: .whitespaces))
+            } else if let r = line.range(of: "[DRY RUN] ") {
                 let rest = line[r.upperBound...]
                 guard let comma = rest.range(of: ", ", options: .backwards) else { continue }
                 report.artifacts.append(.init(path: String(rest[..<comma.lowerBound]),
@@ -218,5 +226,8 @@ struct InstalledApp: Decodable, Identifiable, Hashable {
     let source: String?
     let uninstall_name: String
     let path: String
+    /// Mole's own measurement ("1.2GB"), cached by Mole between runs.
+    let size: String?
     var id: String { path }
+    var bytes: Int64? { size.flatMap { ByteSize.first(in: $0) } }
 }

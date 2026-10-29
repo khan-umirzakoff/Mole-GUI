@@ -40,7 +40,15 @@ enum ByteSize {
         return Int64(value * mult)
     }
 
+    /// "1.3 GB"; zero stays a number ("0 KB") so the dotted numerals can draw it.
     static func format(_ bytes: Int64) -> String {
-        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .decimal)
+        formatter.string(fromByteCount: bytes)
     }
+
+    nonisolated(unsafe) private static let formatter: ByteCountFormatter = {
+        let f = ByteCountFormatter()
+        f.countStyle = .decimal
+        f.allowsNonnumericFormatting = false
+        return f
+    }()
 }

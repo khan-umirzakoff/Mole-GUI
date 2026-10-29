@@ -50,6 +50,7 @@ struct GlowCard<Content: View>: View {
                                                  startPoint: .top, endPoint: .bottom), lineWidth: 1)
             }
             .shadow(color: style == .plain ? .clear : glow.color.opacity(0.22), radius: 28, y: 10)
+            .accessibilityElement(children: .contain)
             .reveal()
     }
 }
@@ -126,7 +127,10 @@ struct AmbientBackground: View {
         .drawingGroup()
         .ignoresSafeArea()
         .animation(.easeInOut(duration: 1.2), value: tint)
-        .onAppear { withAnimation(.easeInOut(duration: 18).repeatForever(autoreverses: true)) { drift = true } }
+        .onAppear {
+            guard !Motion.reduced else { return }
+            withAnimation(.easeInOut(duration: 18).repeatForever(autoreverses: true)) { drift = true }
+        }
     }
 }
 
@@ -186,18 +190,25 @@ struct CircleIconButton: View {
     let symbol: String
     var help: String = ""
     let action: () -> Void
+    @Environment(\.isEnabled) private var enabled
+    @ViewState private var hover = false
 
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 14, weight: .medium))
                 .frame(width: 38, height: 38)
-                .background(Circle().fill(.white.opacity(0.08)))
+                .background(Circle().fill(.white.opacity(hover && enabled ? 0.14 : 0.08)))
                 .overlay(Circle().strokeBorder(.white.opacity(0.12)))
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(.white)
+        .opacity(enabled ? 1 : 0.4)
+        .onHover { hover = $0 }
+        .animation(Motion.quick, value: hover)
         .help(help)
+        .accessibilityLabel(help)
     }
 }
 

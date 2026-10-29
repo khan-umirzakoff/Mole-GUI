@@ -14,36 +14,43 @@ struct RunSheet: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(session.title).font(.system(size: 22, weight: .semibold))
-                    Text(statusText).caption()
+                    HStack(spacing: 6) {
+                        Text(statusText)
+                        if !session.isFinished { Text("·"); Elapsed(since: session.started) }
+                    }
+                    .caption()
+                    .contentTransition(.opacity)
                 }
                 Spacer()
                 Orb(state: orbState).frame(width: 54, height: 54)
             }
 
             GlowCard(glow: glowForState, style: .core, padding: 18) {
-                VStack(alignment: .leading, spacing: 10) {
-                    let shown = session.lines.suffix(showLog ? 400 : 7)
-                    ForEach(Array(shown.enumerated()), id: \.offset) { i, line in
-                        LogLine(text: line)
-                            .id(session.lines.count - shown.count + i)
-                            .transition(.blurFade)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(Array(session.lines.enumerated()), id: \.offset) { _, line in
+                            LogLine(text: line)
+                        }
+                        if !session.live.isEmpty, !session.isFinished {
+                            LogLine(text: session.live).opacity(0.75)
+                        }
+                        if session.lines.isEmpty, session.live.isEmpty {
+                            Text("Starting Mole…").caption()
+                        }
                     }
-                    if !session.live.isEmpty, !session.isFinished {
-                        LogLine(text: session.live).opacity(0.75)
-                    }
-                    if session.lines.isEmpty, session.live.isEmpty {
-                        Text("Starting Mole…").caption()
-                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .animation(Motion.spring, value: session.lines.count)
+                .defaultScrollAnchor(.bottom)
+                .scrollIndicators(showLog ? .automatic : .never)
             }
-            .frame(height: showLog ? 380 : 240)
+            .frame(height: showLog ? 420 : 240)
+            .animation(Motion.spring, value: showLog)
 
             prompt
+                .transition(.blurFade)
 
             HStack {
-                Button(showLog ? "Hide full log" : "Show full log") { withAnimation(.snappy) { showLog.toggle() } }
+                Button(showLog ? "Smaller log" : "Larger log") { showLog.toggle() }
                     .buttonStyle(.pillSecondary)
                 Spacer()
                 if session.isFinished {
@@ -52,12 +59,14 @@ struct RunSheet: View {
                         .keyboardShortcut(.defaultAction)
                 } else {
                     Button("Stop") { session.cancel() }.buttonStyle(.pillSecondary)
+                        .help("Stops Mole the way Ctrl-C would; Mole finishes the item it is on")
                 }
             }
         }
         .padding(28)
         .frame(width: 680)
         .background(Theme.background)
+        .animation(Motion.spring, value: session.phase)
         .interactiveDismissDisabled(!session.isFinished)
     }
 
@@ -89,6 +98,7 @@ struct RunSheet: View {
                         ForEach(QuickReply.options(for: question), id: \.label) { option in
                             Button(option.label) { session.reply(option.keys) }
                                 .buttonStyle(option.primary ? .pill : .pillSecondary)
+                                .keyboardShortcut(option.primary ? .defaultAction : option.keys == "\u{1B}" ? .cancelAction : nil)
                         }
                     }
                 }
@@ -110,7 +120,7 @@ struct RunSheet: View {
         case .running: "Working…"
         case .needsPassword: "Waiting for your password"
         case .needsAnswer: "Mole is asking you something"
-        case .finished(let code): code == 0 ? "Finished" : "Stopped with code \(code)"
+        case .finished(let code): code == 0 ? "Finished" : code == 130 || code == 143 ? "Stopped" : "Mole stopped with code \(code)"
         }
     }
 
@@ -211,7 +221,22 @@ struct Orb: View {
             if state == .done { Image(systemName: "checkmark").font(.system(size: 18, weight: .bold)).foregroundStyle(.black) }
             if state == .failed { Image(systemName: "exclamationmark").font(.system(size: 18, weight: .bold)).foregroundStyle(.black) }
         }
-        .onAppear { withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) { pulse = true } }
+        .animation(Motion.spring, value: state)
+        .onAppear {
+            guard !Motion.reduced else { return }
+            withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) { pulse = true }
+        }
+        .accessibilityElement()
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private var accessibilityText: String {
+        switch state {
+        case .working: "Working"
+        case .waiting: "Waiting for you"
+        case .done: "Finished"
+        case .failed: "Stopped"
+        }
     }
 
     private var color: Color {

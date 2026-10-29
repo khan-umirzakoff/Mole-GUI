@@ -30,7 +30,8 @@ struct SettingsPage: View {
     @EnvironmentObject private var model: AppModel
     @ViewState private var whitelist: [String] = []
     @ViewState private var purgePaths: [String] = []
-    @ViewState private var touchID = "Checking…"
+    /// nil while checking.
+    @ViewState private var touchID: Bool?
     @ViewState private var confirm: ConfirmAction?
 
     var body: some View {
@@ -47,15 +48,22 @@ struct SettingsPage: View {
             HStack(alignment: .top, spacing: 18) {
                 GlowCard(glow: .violet, style: .core) {
                     VStack(alignment: .leading, spacing: 12) {
-                        Label("Touch ID for admin steps", systemImage: "touchid").cardTitle()
-                        Text("Approve Mole's administrator steps with your fingerprint instead of typing the password.").caption()
-                        Text(touchID).font(.system(size: 13, weight: .medium))
-                        Spacer(minLength: 0)
                         HStack {
-                            Button("Turn on") { model.run("Touch ID for sudo", ["touchid", "enable"]) { Task { await checkTouchID() } } }
-                                .buttonStyle(.pill)
-                            Button("Turn off") { model.run("Touch ID for sudo", ["touchid", "disable"]) { Task { await checkTouchID() } } }
-                                .buttonStyle(.pillSecondary)
+                            Label("Touch ID for admin steps", systemImage: "touchid").cardTitle()
+                            Spacer()
+                            switch touchID {
+                            case true?: Tag(text: "On", color: Theme.accent)
+                            case false?: Tag(text: "Off")
+                            case nil: ProgressView().controlSize(.mini).tint(.white)
+                            }
+                        }
+                        Text("Approve Mole's administrator steps with your fingerprint instead of typing the password. Changing it asks for your password once.").caption()
+                        Spacer(minLength: 0)
+                        if let on = touchID {
+                            Button(on ? "Turn off" : "Turn on") {
+                                model.run("Touch ID for sudo", ["touchid", on ? "disable" : "enable"]) { Task { await checkTouchID() } }
+                            }
+                            .buttonStyle(on ? .pillSecondary : .pill)
                         }
                     }
                 }
@@ -101,8 +109,9 @@ struct SettingsPage: View {
     }
 
     private func checkTouchID() async {
+        touchID = nil
         let out = String(decoding: (try? await Mole.capture(["touchid", "status"])) ?? Data(), as: UTF8.self)
-        touchID = TerminalText.lines(out).last ?? "Unknown"
+        touchID = out.contains("is enabled")
     }
 
     private func askToRemoveApp() {
@@ -149,19 +158,28 @@ private struct PathListCard: View {
                 Text(title).cardTitle()
                 Text(caption).caption()
                 VStack(spacing: 6) {
+                    if entries.isEmpty {
+                        Text("None yet").font(.system(size: 12)).foregroundStyle(Theme.tertiaryText)
+                            .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 12).frame(height: 30)
+                    }
                     ForEach(entries, id: \.self) { entry in
                         HStack {
                             Text((entry as NSString).abbreviatingWithTildeInPath)
                                 .font(.system(size: 12, design: .monospaced)).lineLimit(1).truncationMode(.middle)
                             Spacer()
                             Button {
-                                entries.removeAll { $0 == entry }
+                                withAnimation(Motion.quick) { entries.removeAll { $0 == entry } }
                                 save(entries)
-                            } label: { Image(systemName: "minus.circle.fill") }
+                            } label: {
+                                Image(systemName: "minus.circle.fill").frame(width: 24, height: 24).contentShape(Rectangle())
+                            }
                             .buttonStyle(.plain).foregroundStyle(Theme.secondaryText)
+                            .help("Remove")
+                            .accessibilityLabel("Remove \(entry)")
                         }
-                        .padding(.horizontal, 12).frame(height: 30)
+                        .padding(.leading, 12).padding(.trailing, 4).frame(height: 30)
                         .background(Capsule().fill(.white.opacity(0.05)))
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     }
                 }
                 HStack {
@@ -178,7 +196,7 @@ private struct PathListCard: View {
     private func add() {
         let path = draft.trimmingCharacters(in: .whitespaces)
         guard !path.isEmpty, !entries.contains(path) else { return }
-        entries.append(path)
+        withAnimation(Motion.quick) { entries.append(path) }
         save(entries)
         draft = ""
     }
