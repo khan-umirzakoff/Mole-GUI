@@ -60,3 +60,61 @@ struct ParserTests {
         #expect(!InstallerScanner.isInstaller("photos.zip"))
     }
 }
+
+struct BehaviourTests {
+    @Test func zeroBytesStayNumeric() {
+        #expect(Int64(0).metric.value.allSatisfy { $0.isNumber || $0 == "." || $0 == "," })
+        #expect(ByteSize.format(0).contains("0"))
+    }
+
+    @Test func reportIdsSurviveReparse() {
+        let partial = "➤ User essentials\n  → User app cache · 36 items, 1.30GB dry\n"
+        let full = partial + "  → User app logs · 3 items, 3.7MB dry\n➤ Browsers\n  → Chrome cache · 11.1MB dry\n"
+        let a = SectionReport.parse(partial), b = SectionReport.parse(full)
+        #expect(a.sections[0].id == b.sections[0].id)
+        #expect(a.sections[0].items[0].id == b.sections[0].items[0].id)
+        #expect(Set(b.sections.flatMap(\.items).map(\.id)).count == 3)
+    }
+
+    @Test func scanStatusLine() {
+        #expect(Scan<SectionReport>.describe("→ User app cache · 38 items, 1.41GB dry") == "User app cache")
+        #expect(Scan<SectionReport>.describe("→ Arc Service Worker, would clean 40.1MB, 0 protected") == "Arc Service Worker")
+    }
+
+    @Test func purgeNotes() {
+        let r = PurgeReport.parse("◎ Skipped 1 project scan root because scanning did not complete:\n  ~/P (status 124)\n✓ [DRY RUN] ~/P/a/node_modules, 1GB")
+        #expect(r.notes.count == 1)
+        #expect(r.artifacts.count == 1)
+    }
+
+    @Test func appSizeFromMole() throws {
+        let json = #"[{"name":"Steam","bundle_id":"com.valvesoftware.steam","source":"App","uninstall_name":"Steam","path":"/Applications/Steam.app","size":"11.3MB"}]"#
+        let apps = try JSONDecoder().decode([InstalledApp].self, from: Data(json.utf8))
+        #expect(apps[0].bytes == 11_300_000)
+    }
+
+    @Test func historyHidesPreviews() throws {
+        let json = #"{"sessions":[{"command":"clean-dry-run","started_at":"2026-10-30 03:20:08","items":9,"size":"1GB"},{"command":"uninstall","started_at":"2026-10-30 03:20:06","items":0,"size":"0B","actions":{"removed":0}},{"command":"clean","started_at":"2026-10-29 10:00:00","items":12,"size":"2GB"}]}"#
+        let h = try JSONDecoder().decode(HistoryResult.self, from: Data(json.utf8))
+        #expect(h.sessions?.filter(\.changedSomething).map(\.command) == ["clean"])
+        #expect(h.sessions?[0].title == "Clean")
+    }
+
+    @Test func quickRepliesForMolePrompts() {
+        let sudo = QuickReply.options(for: "→ System caches need sudo. Enter continue, Space skip:")
+        #expect(sudo.map(\.label) == ["Continue", "Skip"])
+        #expect(sudo[0].keys == "\r" && sudo[1].keys == " ")
+        let purge = QuickReply.options(for: "→ Remove 3 artifacts, 1.2GB  Enter confirm, ESC cancel:")
+        #expect(purge.map(\.label) == ["Confirm", "Cancel"])
+    }
+
+    /// Runs the bundled Mole; only harmless invocations (version, a rejected flag).
+    @Test func captureStreamsAndReportsFailure() async throws {
+        var seen: [String] = []
+        let data = try await Mole.capture(["--version"]) { seen.append($0) }
+        #expect(String(decoding: data, as: UTF8.self).contains("Mole version"))
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(seen.contains { $0.contains("Mole version") })
+        await #expect(throws: MoleError.self) { _ = try await Mole.capture(["purge", "--no-such-flag"]) }
+    }
+}
