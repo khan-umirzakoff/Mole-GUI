@@ -46,23 +46,27 @@ struct DotMeter: View {
     }
 }
 
-/// Thin vertical bars for short histories (network, per-core load).
+/// Thin vertical bars for short histories (network, per-core load). Bars stay slim however
+/// few values there are, so a handful of cores never turns into fat blobs.
 struct BarSpark: View {
     let values: [Double]
     var color: Color = .white
     var maxValue: Double? = nil
+    var maxBarWidth: CGFloat = 6
 
     var body: some View {
         GeometryReader { geo in
             let top = max(maxValue ?? values.max() ?? 1, 0.0001)
-            HStack(alignment: .bottom, spacing: 3) {
+            let n = CGFloat(max(values.count, 1))
+            let width = min(maxBarWidth, max(2, (geo.size.width - 3 * (n - 1)) / n))
+            HStack(alignment: .bottom, spacing: max(3, (geo.size.width - width * n) / max(n - 1, 1))) {
                 ForEach(Array(values.enumerated()), id: \.offset) { _, v in
                     Capsule()
                         .fill(color.opacity(0.35 + 0.65 * min(v / top, 1)))
-                        .frame(height: max(3, geo.size.height * min(v / top, 1)))
+                        .frame(width: width, height: max(3, geo.size.height * min(v / top, 1)))
                 }
             }
-            .frame(maxHeight: .infinity, alignment: .bottom)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         }
         .animation(Motion.reduced ? nil : .smooth(duration: 0.4), value: values)
         .accessibilityHidden(true)
@@ -89,5 +93,23 @@ struct AppIcon: View {
         let image = NSWorkspace.shared.icon(forFile: path)
         cache.setObject(image, forKey: path as NSString)
         return image
+    }
+}
+
+/// A small breathing dot that marks work in progress (sidebar, scanning badges).
+struct PulseDot: View {
+    var color: Color = Theme.accent
+    @ViewState private var on = false
+
+    var body: some View {
+        Circle().fill(color)
+            .frame(width: 7, height: 7)
+            .overlay(Circle().stroke(color.opacity(on ? 0 : 0.6), lineWidth: 1).scaleEffect(on ? 2.4 : 1))
+            .opacity(on ? 1 : 0.55)
+            .onAppear {
+                guard !Motion.reduced else { on = true; return }
+                withAnimation(.easeOut(duration: 1.1).repeatForever(autoreverses: false)) { on = true }
+            }
+            .accessibilityHidden(true)
     }
 }

@@ -22,7 +22,8 @@ enum TerminalText {
 
     /// Splits a block of output (for example a whole dry run) into visible, non-empty lines.
     static func lines(_ output: String) -> [String] {
-        output.split(separator: "\n", omittingEmptySubsequences: false)
+        // "\r\n" is a single Character in Swift, so it never equals "\n"; normalise it first.
+        output.replacingOccurrences(of: "\r\n", with: "\n").split(separator: "\n", omittingEmptySubsequences: false)
             .map { visible(String($0)) }
             .filter { !$0.isEmpty }
     }

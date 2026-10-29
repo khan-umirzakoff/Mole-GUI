@@ -46,6 +46,7 @@ struct ParserTests {
         #expect(TerminalText.visible("⠋ Scanning\r\u{1B}[2K✓ Done") == "✓ Done")
         #expect(MoleSession.completeUTF8Length(Data("ab".utf8) + Data([0xE2, 0x9C])) == 2)
         #expect(MoleSession.completeUTF8Length(Data("a✓".utf8)) == 4)
+        #expect(TerminalText.lines("one\r\ntwo\r\n⠋ x\r✓ three") == ["one", "two", "✓ three"])
     }
 
     @Test func treemapFillsRect() {
@@ -116,5 +117,40 @@ struct BehaviourTests {
         try await Task.sleep(for: .milliseconds(100))
         #expect(seen.contains { $0.contains("Mole version") })
         await #expect(throws: MoleError.self) { _ = try await Mole.capture(["purge", "--no-such-flag"]) }
+    }
+}
+
+/// Drives real Mole sessions in a pseudo-terminal, with harmless commands only.
+@MainActor
+struct SessionTests {
+    private func waitUntil(_ session: MoleSession, seconds: Double, _ done: (MoleSession) -> Bool) async {
+        let end = Date().addingTimeInterval(seconds)
+        while !done(session), Date() < end { try? await Task.sleep(for: .milliseconds(200)) }
+    }
+
+    @Test func touchIDStatusRunsInTerminal() async {
+        let s = MoleSession(title: "Touch ID", args: ["touchid", "status"])
+        s.start()
+        await waitUntil(s, seconds: 20) { $0.isFinished }
+        #expect(s.exitCode == 0)
+        #expect(s.lines.contains { $0.contains("Touch ID") })
+    }
+
+    /// Slow (Mole scans the app's files): BURROW_SLOW_TESTS=1 swift test --filter uninstallPreview
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["BURROW_SLOW_TESTS"] != nil))
+    func uninstallPreviewAsksAndCancels() async {
+        let s = MoleSession(title: "Preview", args: ["uninstall", "--dry-run", "Steam"])
+        s.start()
+        await waitUntil(s, seconds: 240) { if case .needsAnswer = $0.phase { return true }; return $0.isFinished }
+        print("PHASE:", s.phase)
+        print(s.lines.suffix(40).joined(separator: "\n"))
+        #expect(s.lines.contains { $0.contains("Steam.app") })
+        if case .needsAnswer(let q) = s.phase {
+            #expect(!q.contains("\n"))
+            #expect(QuickReply.options(for: q).map(\.label) == ["Confirm", "Cancel"])
+            s.cancel()
+        }
+        await waitUntil(s, seconds: 20) { $0.isFinished }
+        #expect(s.isFinished)
     }
 }

@@ -131,7 +131,7 @@ struct HeroCard<Actions: View>: View {
                 }
                 HStack(alignment: .bottom, spacing: 16) {
                     VStack(alignment: .leading, spacing: 12) {
-                        value.frame(height: 56, alignment: .bottomLeading)
+                        value.frame(height: 80, alignment: .bottomLeading)
                         footnote
                     }
                     Spacer(minLength: 12)
@@ -139,7 +139,7 @@ struct HeroCard<Actions: View>: View {
                 }
             }
         }
-        .frame(height: 200)
+        .frame(height: 216)
         .animation(Motion.spring, value: scanning)
     }
 
@@ -178,7 +178,7 @@ struct ScanningBadge: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            ProgressView().controlSize(.mini).tint(.white)
+            PulseDot()
             Text("Scanning")
             Elapsed(since: started)
         }
@@ -266,8 +266,10 @@ struct ReportRow: View {
 
     /// The size is already shown on the right; keep the rest of Mole's detail.
     private var cleanDetail: String {
-        guard item.kind == .action, let b = item.bytes, b > 0 else { return item.detail }
-        return item.detail.components(separatedBy: ", ").filter { ByteSize.first(in: $0) == nil }.joined(separator: ", ")
+        // Mole speaks to terminal users; here the app is the one that needs the access.
+        let detail = item.detail.replacingOccurrences(of: "to your terminal", with: "to Burrow")
+        guard item.kind == .action, let b = item.bytes, b > 0 else { return detail }
+        return detail.components(separatedBy: ", ").filter { ByteSize.first(in: $0) == nil }.joined(separator: ", ")
     }
 }
 

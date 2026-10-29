@@ -160,7 +160,9 @@ final class MoleSession: ObservableObject, Identifiable {
         let cut = Self.completeUTF8Length(undecoded)
         let text = String(decoding: undecoded.prefix(cut), as: UTF8.self)
         undecoded = Data(undecoded.dropFirst(cut))
-        pending += text
+        // A terminal ends lines with "\r\n", one Character in Swift that never equals "\n".
+        // Normalising after appending also joins a "\r" and "\n" split across two reads.
+        pending = (pending + text).replacingOccurrences(of: "\r\n", with: "\n")
         while let nl = pending.firstIndex(of: "\n") {
             commit(String(pending[..<nl]))
             pending = String(pending[pending.index(after: nl)...])
@@ -172,7 +174,8 @@ final class MoleSession: ObservableObject, Identifiable {
 
     private func commit(_ raw: String) {
         let line = TerminalText.visible(raw)
-        guard !line.isEmpty else { return }
+        // Spinner frames (braille dots) are progress noise, not log lines.
+        guard !line.isEmpty, !(0x2800...0x28FF).contains(line.unicodeScalars.first!.value) else { return }
         answeredPrompt = ""
         if lines.last != line { lines.append(line) }
         if lines.count > 4000 { lines.removeFirst(lines.count - 4000) }

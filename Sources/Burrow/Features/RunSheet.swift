@@ -93,7 +93,7 @@ struct RunSheet: View {
         case .needsAnswer(let question):
             GlowCard(glow: .ember, style: .rim, padding: 18) {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(question).cardTitle().lineLimit(3)
+                    Text(question.trimmingCharacters(in: CharacterSet(charactersIn: "➤→◎⊙ "))).cardTitle().lineLimit(3)
                     HStack(spacing: 10) {
                         ForEach(QuickReply.options(for: question), id: \.label) { option in
                             Button(option.label) { session.reply(option.keys) }

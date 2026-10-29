@@ -63,12 +63,7 @@ struct UninstallPage: View {
             HStack(spacing: 12) {
                 SearchField(text: $query, prompt: catalog.apps.isEmpty ? "Search apps" : "Search \(catalog.apps.count) apps",
                             focused: $searchFocused)
-                Picker("Sort", selection: $sortBySize) {
-                    Text("Largest").tag(true)
-                    Text("A–Z").tag(false)
-                }
-                .labelsHidden()
-                .pickerStyle(.segmented).frame(width: 160)
+                PillPicker(selection: $sortBySize, options: [("Largest", true), ("A–Z", false)])
                 CircleIconButton(symbol: "arrow.clockwise", help: "Reload the app list") { Task { await catalog.load() } }
                     .keyboardShortcut("r", modifiers: .command)
                     .disabled(catalog.loading)

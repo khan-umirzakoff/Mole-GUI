@@ -100,7 +100,7 @@ struct InstallersPage: View {
             if let files, files.isEmpty {
                 EmptyState(symbol: "checkmark.seal", text: "No installer files left behind.")
             }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 14)], spacing: 14) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 360), spacing: 14)], spacing: 14) {
                 ForEach(files ?? []) { file in
                     SelectTile(selected: selected.contains(file.path), glow: .ember) { toggle(file) } content: {
                         AppIcon(path: file.path, size: 38)

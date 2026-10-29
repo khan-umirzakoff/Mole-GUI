@@ -212,6 +212,33 @@ struct CircleIconButton: View {
     }
 }
 
+/// A capsule segmented control in the app's style; the white pill slides to the choice.
+struct PillPicker<Value: Hashable>: View {
+    @Binding var selection: Value
+    let options: [(String, Value)]
+    @Namespace private var pill
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(options, id: \.1) { title, value in
+                let on = selection == value
+                Button { withAnimation(Motion.quick) { selection = value } } label: {
+                    Text(title).font(.system(size: 12.5, weight: on ? .semibold : .regular))
+                        .foregroundStyle(on ? Color.black : .white.opacity(0.75))
+                        .padding(.horizontal, 14).frame(height: 30)
+                        .background { if on { Capsule().fill(.white).matchedGeometryEffect(id: "pill", in: pill) } }
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+        }
+        .padding(4)
+        .background(Capsule().fill(.white.opacity(0.07)))
+        .overlay(Capsule().strokeBorder(Theme.hairline))
+    }
+}
+
 /// A small rounded tag ("Would clean", "Admin", "Skipped").
 struct Tag: View {
     let text: String

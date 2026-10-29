@@ -50,7 +50,8 @@ struct SectionReport {
             }
             let body = String(line.dropFirst()).trimmingCharacters(in: .whitespaces)
             if report.sections.isEmpty {
-                if kind != .ok || !body.hasPrefix("Whitelist") { report.notes.append(body) }
+                // The dry-run banner and the whitelist count are Mole talking to the terminal.
+                if !body.hasPrefix("DRY RUN"), kind != .ok || !body.hasPrefix("Whitelist") { report.notes.append(body) }
                 continue
             }
             let parts = body.components(separatedBy: " · ")

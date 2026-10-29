@@ -54,7 +54,7 @@ struct SettingsPage: View {
                             switch touchID {
                             case true?: Tag(text: "On", color: Theme.accent)
                             case false?: Tag(text: "Off")
-                            case nil: ProgressView().controlSize(.mini).tint(.white)
+                            case nil: PulseDot(color: .white)
                             }
                         }
                         Text("Approve Mole's administrator steps with your fingerprint instead of typing the password. Changing it asks for your password once.").caption()

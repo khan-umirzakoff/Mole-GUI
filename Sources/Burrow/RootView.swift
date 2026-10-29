@@ -121,7 +121,7 @@ private struct SidebarItem: View {
                 Text(page.title).font(.system(size: 14, weight: selected ? .semibold : .regular))
                 Spacer()
                 if busy {
-                    ProgressView().controlSize(.mini).tint(selected ? .black : .white)
+                    PulseDot(color: selected ? page.glow.color : Theme.accent)
                         .transition(.scale.combined(with: .opacity))
                 }
             }
@@ -141,7 +141,7 @@ private struct SidebarItem: View {
         .onHover { hover = $0 }
         .animation(Motion.spring, value: selected)
         .animation(Motion.quick, value: busy)
-        .help("\(page.title)  ⌘\(page.shortcut.character)")
+        .help(page.title + "  ⌘" + String(page.shortcut.character))
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityValue(busy ? "Scanning" : "")
     }

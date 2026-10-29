@@ -230,7 +230,7 @@ struct QuickAction: View {
                         HStack(spacing: 8) {
                             Text(value).font(.system(size: 20, weight: .semibold)).foregroundStyle(.white)
                                 .monospacedDigit().contentTransition(.numericText())
-                            if busy { ProgressView().controlSize(.mini).tint(.white) }
+                            if busy { PulseDot() }
                         }
                         if !detail.isEmpty { Text(detail).font(.system(size: 11)).foregroundStyle(Theme.tertiaryText).lineLimit(1) }
                     }

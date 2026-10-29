@@ -107,7 +107,7 @@ struct OptimizePage: View {
                                     MetricValue(value: "\(pendingSteps)", unit: pendingSteps == 1 ? "step to run" : "steps to run", dot: 7)
                                 }
                             }
-                            .frame(height: 56, alignment: .bottomLeading)
+                            .frame(height: 80, alignment: .bottomLeading)
                             Text(footnote).font(.system(size: 12))
                                 .foregroundStyle(scan.error != nil && !scan.scanning ? Theme.danger : Theme.secondaryText)
                                 .lineLimit(2)
@@ -124,7 +124,7 @@ struct OptimizePage: View {
                     }
                 }
             }
-            .frame(height: 200)
+            .frame(height: 216)
             .animation(Motion.spring, value: scan.scanning)
 
             if let report {
