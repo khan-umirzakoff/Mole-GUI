@@ -49,6 +49,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             source.resume()
             signalSources.append(source)
         }
+        scheduleSnapshot()
+    }
+
+    /// `-snapshot <file.png> [-snapshotDelay <seconds>]`: draws the window into a PNG without the
+    /// screen (works while the Mac is locked), then quits. Used for screenshots in reviews.
+    private func scheduleSnapshot() {
+        let defaults = UserDefaults.standard
+        guard let path = defaults.string(forKey: "snapshot") else { return }
+        let delay = defaults.double(forKey: "snapshotDelay") > 0 ? defaults.double(forKey: "snapshotDelay") : 10
+        // `-snapshotSize 1080x700` checks a layout at a given window size.
+        if let size = defaults.string(forKey: "snapshotSize")?.split(separator: "x").compactMap({ Double($0) }), size.count == 2 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                NSApp.windows.first?.setContentSize(NSSize(width: size[0], height: size[1]))
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            if let view = NSApp.windows.first(where: { $0.isVisible || $0.contentView != nil })?.contentView,
+               let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                view.cacheDisplay(in: view.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+            }
+            NSApp.terminate(nil)
+        }
     }
 
     /// A real Mole run (the run sheet) is not stopped silently: ask first.
