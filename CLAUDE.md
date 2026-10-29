@@ -29,6 +29,12 @@ folders or memories.
   `~/Library/Logs/mole`); tests use a temporary directory.
 - Quit Burrow after testing and make sure no `Burrow.app/Contents/Resources/mole` process remains.
 
+## Screenshots for reviews
+`build/Burrow.app/Contents/MacOS/Burrow -startPage <page> -snapshot <file.png> [-snapshotDelay 12]
+[-snapshotSize 1080x700]` draws the window offscreen and quits; it works while the screen is locked.
+Pages: overview, clean, uninstall, optimize, analyze, projects, installers, slim, history, settings.
+`swift test` must run outside the sandbox; after a sandboxed run, `rm -rf .build` first.
+
 ## Design bar
 Dark, premium, few large elements: squircle cards lit by one hue (rim or inner glow), dot-matrix
 numerals, dotted meters, capsule buttons, white circular icon buttons; smooth, purposeful motion that
