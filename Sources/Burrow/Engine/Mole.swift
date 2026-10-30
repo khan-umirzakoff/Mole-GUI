@@ -48,14 +48,20 @@ enum Mole {
     nonisolated(unsafe) private static var livePIDs = Set<pid_t>()
     private static let liveLock = NSLock()
 
-    static func track(pid: pid_t) { liveLock.withLock { _ = livePIDs.insert(pid) } }
+    nonisolated(unsafe) private static var shuttingDown = false
+
+    /// A process that registers after `terminateAll` took its list is stopped at once.
+    static func track(pid: pid_t) {
+        let late = liveLock.withLock { livePIDs.insert(pid); return shuttingDown }
+        if late { signalTree(pid, SIGTERM) }
+    }
     static func untrack(pid: pid_t) { liveLock.withLock { _ = livePIDs.remove(pid) } }
 
     /// Stops every Mole process the app started, for good: Burrow is going away and nothing
     /// may keep running (or keep waiting at a prompt) without it. Interactive Mole scripts trap
     /// TERM and HUP, so whatever survives a short grace period is killed.
     static func terminateAll() {
-        let roots = liveLock.withLock { livePIDs }
+        let roots = liveLock.withLock { shuttingDown = true; return livePIDs }
         // Collect the whole tree first: children move to launchd once their parent is gone.
         let all = roots.flatMap(tree)
         guard !all.isEmpty else { return }

@@ -50,7 +50,7 @@ enum Treemap {
 
 /// Mole's size map of one folder at a time, with a trail for drilling down and back. Every
 /// folder measured this session is remembered, so going back is instant; the whole-Mac map is
-/// also kept between launches. "Measure again" (`reload`) is the only way to re-measure.
+/// also kept between launches. Rescan (`reload`) is the only way to re-measure.
 @MainActor
 final class DiskMap: ObservableObject {
     @Published var trail: [String] = []
@@ -64,6 +64,7 @@ final class DiskMap: ObservableObject {
     private var task: Task<Void, Never>?
     private var measured: [String: (result: AnalyzeResult, at: Date)] = [:]
     private static let wholeMacKey = "analyze --json"
+    private var lastAttempt: Date?
 
     var current: String? { trail.last }
 
@@ -100,17 +101,26 @@ final class DiskMap: ObservableObject {
     }
 
     /// Measures the whole Mac in the background when its map is missing or old.
+    /// On the whole-Mac view it runs like Rescan (progress, sidebar dot, ⌘R does not start a
+    /// second one); elsewhere it measures quietly and keeps the result for later.
     func refreshIfStale() async {
-        guard ResultCache.isStale(measured[""]?.at), task == nil else { return }
-        let args = ["analyze", "--json"]
-        guard let data = try? await Mole.capture(args), let r = try? Mole.decode(AnalyzeResult.self, from: data) else { return }
-        remember(r, data: data, for: "")
-        if trail.isEmpty, task == nil { show() }
+        guard task == nil, ResultCache.isStale(measured[""]?.at), ResultCache.isStale(lastAttempt) else { return }
+        lastAttempt = Date()
+        if trail.isEmpty {
+            reload()
+            await task?.value
+        } else if let data = try? await Mole.capture(["analyze", "--json"]),
+                  let r = try? Mole.decode(AnalyzeResult.self, from: data),
+                  (measured[""]?.at ?? .distantPast) < lastAttempt ?? .distantPast {
+            // Kept only if no newer whole-Mac map arrived meanwhile.
+            remember(r, data: data, for: "")
+        }
     }
 
     /// Everything measured is out of date after something was trashed; the current folder is measured again.
     func forgetAndReload() {
         measured.removeAll()
+        ResultCache.forget(Self.wholeMacKey)
         reload()
     }
 
@@ -252,9 +262,6 @@ struct AnalyzePage: View {
                                              .init(color: .black, location: 0.94), .init(color: .clear, location: 1)],
                                      startPoint: .leading, endPoint: .trailing))
                 CircleIconButton(symbol: "folder", help: "Map another folder…") { choose() }
-                CircleIconButton(symbol: "arrow.clockwise", help: "Measure again") { map.reload() }
-                    .keyboardShortcut("r", modifiers: .command)
-                    .disabled(map.loading)
             }
 
             breadcrumb
@@ -405,8 +412,12 @@ struct AnalyzePage: View {
             }
             Spacer()
             if let at = map.measuredAt, !map.loading {
-                Text("Measured \(at.formatted(.relative(presentation: .named)))").caption()
-                    .padding(.trailing, 6)
+                CheckedAgo(date: at)
+                Button("Rescan") { map.reload() }.buttonStyle(.plain)
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.accent)
+                    .keyboardShortcut("r", modifiers: .command)
+                    .help("Measure this folder again (⌘R)")
+                Text("·").foregroundStyle(Theme.tertiaryText)
             }
             if isOverview {
                 if let used = Self.usedOnDisk { Text("\(used.bytesText) used on this Mac").font(.system(size: 13, weight: .semibold)) }

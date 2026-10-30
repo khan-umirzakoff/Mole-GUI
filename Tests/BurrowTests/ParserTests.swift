@@ -270,10 +270,33 @@ struct LeftoverTests {
         #expect(LeftoverScanner.inUse("com.google.Keystone.Agent", installed: installed))
         #expect(LeftoverScanner.inUse("com.apple.Safari", installed: []))
         #expect(LeftoverScanner.inUse("com.agilebits.onepassword7", installed: []))
-        #expect(LeftoverScanner.inUse("org.cups.PrintingPrefs", installed: []))
         #expect(!LeftoverScanner.inUse("com.spotify.client", installed: installed))
         // A vendor prefix must match whole parts: com.googlex is not Google.
         #expect(!LeftoverScanner.inUse("com.googlex.app", installed: installed))
+    }
+
+    @Test func readableNames() {
+        #expect(Leftover.displayName("com.figma.Desktop") == "Figma Desktop")
+        #expect(Leftover.displayName("com.netease.mumu.nemux-global") == "Nemux Global")
+        #expect(Leftover.displayName("com.tw93.MoleApp") == "MoleApp")
+        #expect(Leftover.displayName("com.FluidApp.app") == "FluidApp App")
+        #expect(Leftover.displayName("net.imput.helium") == "Helium")
+    }
+
+    @Test func protectedPaths() {
+        let item = "/Users/me/Library/Caches/com.foo.Bar"
+        #expect(LeftoverScanner.isProtected(item, by: [item]))
+        #expect(LeftoverScanner.isProtected(item, by: ["/Users/me/Library/Caches"]))
+        #expect(LeftoverScanner.isProtected(item, by: ["/Users/*/Library/Caches/com.foo*"]))
+        #expect(LeftoverScanner.isProtected(item, by: [item + "/keep.db"]))
+        #expect(LeftoverScanner.isProtected(item, by: ["/Users/*/Library/Caches/com.foo.Bar/*"]))
+        #expect(!LeftoverScanner.isProtected(item, by: ["/Users/me/Library/Caches/com.other"]))
+        #expect(!LeftoverScanner.isProtected(item, by: ["/Users/me/Library/Logs"]))
+    }
+
+    @Test func moleProtectsItsSensitiveBundles() throws {
+        let kept = try #require(LeftoverScanner.protectedByMole(["com.authy.authy", "com.yubico.yubioath", "org.cups.PrintingPrefs", "com.tw93.MoleApp"]))
+        #expect(kept == ["com.authy.authy", "com.yubico.yubioath", "org.cups.PrintingPrefs"])
     }
 
     @Test func staleness() {

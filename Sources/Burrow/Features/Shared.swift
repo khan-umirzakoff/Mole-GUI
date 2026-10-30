@@ -21,6 +21,11 @@ enum ResultCache {
         return (data, date)
     }
 
+    /// The saved result no longer matches the disk (the app removed something itself).
+    static func forget(_ key: String) {
+        try? FileManager.default.removeItem(at: folder.appendingPathComponent(key))
+    }
+
     static func isStale(_ date: Date?) -> Bool {
         date.map { Date().timeIntervalSince($0) > staleAfter } ?? true
     }
@@ -44,6 +49,9 @@ final class Scan<Report>: ObservableObject {
 
     private let args: [String]
     private let cacheKey: String
+    /// A scan that keeps failing (a scan folder that times out) is not retried in the background
+    /// more often than a fresh result would be.
+    private var lastAttempt: Date?
     private let parse: (String) -> Report
     private let progressFile: URL?
     private var task: Task<Void, Never>?
@@ -69,12 +77,13 @@ final class Scan<Report>: ObservableObject {
 
     func start() {
         guard task == nil else { return }
+        lastAttempt = Date()
         task = Task { await perform(); task = nil }
     }
 
     /// Scans again when there is no result yet or it is old; returns once the scan is done.
     func refreshIfStale() async {
-        guard task != nil || ResultCache.isStale(finishedAt) else { return }
+        guard task != nil || (ResultCache.isStale(finishedAt) && ResultCache.isStale(lastAttempt)) else { return }
         start()
         await task?.value
     }
@@ -87,6 +96,8 @@ final class Scan<Report>: ObservableObject {
         guard var r = report else { return }
         change(&r)
         report = r
+        // The adjusted report cannot be saved as Mole's output; the next launch scans again.
+        ResultCache.forget(cacheKey)
     }
 
     private func perform() async {
@@ -106,6 +117,8 @@ final class Scan<Report>: ObservableObject {
         }
         do {
             let data = try await Mole.capture(args) { [weak self] line in self?.ingest(line) }
+            // Stopped after Mole finished but before this resumed: keep the previous result.
+            guard !Task.isCancelled else { return }
             report = parse(String(decoding: data, as: UTF8.self))
             finishedAt = Date()
             ResultCache.save(data, as: cacheKey)
@@ -150,6 +163,17 @@ final class Scan<Report>: ObservableObject {
     }
 }
 
+/// "Checked 5 minutes ago" that keeps itself current while the window sits idle.
+struct CheckedAgo: View {
+    let date: Date
+
+    var body: some View {
+        TimelineView(.everyMinute) { _ in
+            Text("Checked \(date.formatted(.relative(presentation: .named)))").caption()
+        }
+    }
+}
+
 /// The large hero card at the top of every tool page. While Mole scans it shows the total
 /// found so far, the section Mole is in and how long it has been running.
 struct HeroCard<Actions: View>: View {
@@ -177,7 +201,7 @@ struct HeroCard<Actions: View>: View {
                     if scanning {
                         ScanningBadge(started: started).transition(.blurFade)
                     } else if let checked {
-                        Text("Checked \(checked.formatted(.relative(presentation: .named)))").caption().transition(.blurFade)
+                        CheckedAgo(date: checked).transition(.blurFade)
                     }
                 }
                 .frame(height: 28)

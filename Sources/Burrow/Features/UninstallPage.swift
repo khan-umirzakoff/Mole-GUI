@@ -17,8 +17,18 @@ final class AppCatalog: ObservableObject {
         }
     }
 
+    private var loadTask: Task<Void, Never>?
+
+    /// A second caller waits for the list already loading instead of starting another.
     func load() async {
-        guard !loading else { return }
+        if let loadTask { return await loadTask.value }
+        let task = Task { await fetch() }
+        loadTask = task
+        await task.value
+        loadTask = nil
+    }
+
+    private func fetch() async {
         loading = true
         error = nil
         defer { loading = false }
@@ -78,11 +88,11 @@ struct UninstallPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            PillPicker(selection: $showLeftovers.animation(Motion.spring), options: [("Installed apps", false), ("Leftovers of removed apps", true)])
+            PillPicker(selection: $showLeftovers, options: [("Apps", false), ("Leftovers", true)])
             if showLeftovers {
-                LeftoversView(store: leftovers).transition(.blurFade)
+                LeftoversView(store: leftovers).transition(.opacity)
             } else {
-                installed.transition(.blurFade)
+                installed.transition(.opacity)
             }
         }
     }
@@ -93,6 +103,7 @@ struct UninstallPage: View {
                 SearchField(text: $query, prompt: catalog.apps.isEmpty ? "Search apps" : "Search \(catalog.apps.count) apps",
                             focused: $searchFocused)
                 PillPicker(selection: $sortBySize, options: [("Largest", true), ("A–Z", false)])
+                if let at = catalog.checkedAt, !catalog.loading { CheckedAgo(date: at) }
                 CircleIconButton(symbol: "arrow.clockwise", help: "Reload the app list") { Task { await catalog.load() } }
                     .keyboardShortcut("r", modifiers: .command)
                     .disabled(catalog.loading)
@@ -170,7 +181,10 @@ struct UninstallPage: View {
                         button: "Uninstall") {
             model.run("Uninstalling", ["uninstall"] + flags + names) {
                 selected.removeAll()
-                Task { await catalog.load() }
+                Task {
+                    await catalog.load()
+                    await leftovers.load()
+                }
             }
         }
     }

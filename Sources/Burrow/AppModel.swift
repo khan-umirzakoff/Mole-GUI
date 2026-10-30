@@ -98,22 +98,36 @@ final class AppModel: ObservableObject {
         installers.onBusyChange = { [weak self] in self?.mark(.installers, $0) }
         leftovers.onBusyChange = { [weak self] in self?.mark(.uninstall, $0) }
         diskMap.onBusyChange = { [weak self] in self?.mark(.analyze, $0) }
-        // Last results come from the cache at once. In the background, one at a time so the Mac
-        // stays responsive, anything missing or older than a few hours is checked again; pages
-        // never re-scan on their own, the Rescan buttons do.
         Task {
             await installers.load()
             await leftovers.load()
-            // Review snapshots and the demo tour show what is cached; they never start Mole.
-            guard UserDefaults.standard.string(forKey: "snapshot") == nil,
-                  UserDefaults.standard.string(forKey: "tour") == nil else { return }
-            await clean.refreshIfStale()
-            await apps.refreshIfStale()
-            await purge.refreshIfStale()
-            await slim.refreshIfStale()
-            await optimize.refreshIfStale()
-            await diskMap.refreshIfStale()
+            await refreshStale()
         }
+        // A window left open for days still gets fresh results when the user comes back to it.
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil,
+                                               queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { Task { await self?.refreshStale() } }
+        }
+    }
+
+    private var refreshing = false
+
+    /// Last results come from the cache at once. In the background, one at a time so the Mac
+    /// stays responsive, anything missing or older than a few hours is checked again: quick
+    /// scans first, the slow walks (Disk Map, project folders) last. Pages never re-scan on
+    /// their own; the Rescan buttons do.
+    func refreshStale() async {
+        // Review snapshots and the demo tour show what is cached; they never start Mole.
+        guard !refreshing, UserDefaults.standard.string(forKey: "snapshot") == nil,
+              UserDefaults.standard.string(forKey: "tour") == nil else { return }
+        refreshing = true
+        defer { refreshing = false }
+        await optimize.refreshIfStale()
+        await slim.refreshIfStale()
+        await apps.refreshIfStale()
+        await clean.refreshIfStale()
+        await diskMap.refreshIfStale()
+        await purge.refreshIfStale()
     }
 
     private func mark(_ page: Page, _ on: Bool) {

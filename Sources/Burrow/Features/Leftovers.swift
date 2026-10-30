@@ -16,16 +16,43 @@ struct Leftover: Identifiable, Hashable {
     var kinds: [Kind] { Array(Set(items.map(\.kind))).sorted { $0.rawValue < $1.rawValue } }
     var name: String {
         if let trashedApp { return ((trashedApp as NSString).lastPathComponent as NSString).deletingPathExtension }
-        let last = bundleID.split(separator: ".").last.map(String.init) ?? bundleID
-        return last.prefix(1).uppercased() + last.dropFirst()
+        return Self.displayName(bundleID)
+    }
+
+    /// The most telling words of a bundle id: "com.figma.Desktop" → "Figma Desktop",
+    /// "com.netease.mumu.nemux-global" → "Nemux Global", "com.tw93.MoleApp" → "MoleApp".
+    static func displayName(_ id: String) -> String {
+        let parts = id.split(separator: ".").map(String.init)
+        let generic: Set<String> = ["app", "desktop", "mac", "macos", "client", "helper", "emulator", "agent", "launcher"]
+        var words = [parts.last ?? id]
+        if generic.contains(words[0].lowercased()) || words[0].count <= 3, parts.count >= 3 {
+            words.insert(parts[parts.count - 2], at: 0)
+        }
+        return words.joined(separator: " ")
+            .replacingOccurrences(of: "-", with: " ").replacingOccurrences(of: "_", with: " ")
+            .split(separator: " ").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
+    }
+
+    /// The symbol for the kind of data that takes most of the space.
+    var symbol: String {
+        switch items.first?.kind {
+        case .web: "globe"
+        case .logs: "doc.text"
+        case .settings: "gearshape"
+        case .data: "folder"
+        case .state: "macwindow"
+        default: "archivebox"
+        }
     }
 }
 
-/// Finds leftovers the way Mole's `clean` does (bundle-id names, never Apple's or a password
-/// manager's), but caches show after a week unused instead of Mole's 30 days. Anything touched
-/// in the last week still has a user (often a command-line tool); app data and settings wait
-/// 30 days. A vendor with any app still installed keeps all its folders: updaters and helpers
-/// share the vendor's prefix.
+/// Finds leftovers the way Mole's `clean` does: entries named after a bundle id whose app is
+/// gone, never what Mole's own `should_protect_data` protects, never a user-protected path.
+/// Two differences: caches show after a week unused instead of Mole's 30 days (anything
+/// touched in the last week still has a user, often a command-line tool), and an app waiting in
+/// the Trash shows at once. Only regenerable data is offered (caches, logs, window state, web
+/// data); an app's data and settings only when that very app is in the Trash, which proves whose
+/// they are. A vendor with any app still installed keeps everything: helpers share its prefix.
 enum LeftoverScanner {
     static let places: [(String, Leftover.Kind)] = [
         ("Library/Caches", .cache), ("Library/Logs", .logs), ("Library/Saved Application State", .state),
@@ -33,11 +60,10 @@ enum LeftoverScanner {
         ("Library/Application Support", .data), ("Library/Preferences", .settings),
     ]
     static let prefixes: Set<String> = ["com", "org", "net", "io", "app", "dev", "ai", "co", "me"]
-    /// Mole's never-delete patterns, plus system parts that are not apps (printing).
+    /// Mole's never-delete name patterns (`ORPHAN_NEVER_DELETE_PATTERNS`).
     static let never = ["password", "keychain", "bitwarden", "lastpass", "keepass", "dashlane", "enpass",
-                        "ssh", "gpg", "gnupg", "org.cups."]
-    static let cacheAge: TimeInterval = 7 * 86400
-    static let dataAge: TimeInterval = 30 * 86400
+                        "ssh", "gpg", "gnupg"]
+    static let unusedFor: TimeInterval = 7 * 86400
 
     /// "com.foo.Bar", "com.foo.Bar.savedState", "com.foo.Bar.plist" → "com.foo.Bar".
     nonisolated static func bundleID(fromEntry name: String) -> String? {
@@ -57,11 +83,60 @@ enum LeftoverScanner {
         return installed.contains { $0 == lower || $0.hasPrefix(vendor) }
     }
 
+    /// Whether removing `path` would touch a protected entry: the entry itself, a folder above it,
+    /// or anything inside it (`~/x/com.foo/keep.db` protects `~/x/com.foo`). Globs work at any depth.
+    nonisolated static func isProtected(_ path: String, by patterns: [String]) -> Bool {
+        let parts = path.split(separator: "/")
+        return patterns.contains { pattern in
+            let p = pattern.split(separator: "/")
+            let n = min(p.count, parts.count)
+            // Cut both to the shorter depth: equal depth is the entry, a longer pattern is inside it,
+            // a shorter one is a folder above it.
+            return fnmatch("/" + p.prefix(n).joined(separator: "/"), "/" + parts.prefix(n).joined(separator: "/"), 0) == 0
+        }
+    }
+
+    /// Mole's protection rules (`~/.config/mole/whitelist`) as absolute patterns; nil when the
+    /// file exists but cannot be read, so nothing is offered rather than something protected.
+    nonisolated static func protectedPatterns() -> [String]? {
+        let url = ConfigList.whitelist.url
+        guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+        guard (try? String(contentsOf: url, encoding: .utf8)) != nil else { return nil }
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return ConfigList.whitelist.read().map {
+            var p = ($0.replacingOccurrences(of: "${HOME}", with: home).replacingOccurrences(of: "$HOME", with: home)
+                     as NSString).expandingTildeInPath
+            while p.count > 1, p.hasSuffix("/") { p.removeLast() }
+            return p
+        }
+    }
+
+    /// The ids Mole's own `should_protect_data` keeps (Authy, YubiKey, developer tools, input
+    /// methods, VPNs…), asked from the bundled Mole so both always agree. nil if Mole could not
+    /// answer, and then nothing is offered.
+    nonisolated static func protectedByMole(_ ids: [String]) -> Set<String>? {
+        guard !ids.isEmpty else { return [] }
+        let script = #"source "$1/lib/core/app_protection.sh"; shift; for id in "$@"; do should_protect_data "$id" && echo "$id"; done; echo __done__"#
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/bash")
+        p.arguments = ["-c", script, "burrow", Mole.root.path] + ids
+        p.environment = Mole.environment(tty: false)
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return nil }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        let lines = String(decoding: data, as: UTF8.self).split(separator: "\n").map(String.init)
+        guard lines.last == "__done__" else { return nil }
+        return Set(lines.dropLast())
+    }
+
     nonisolated static func scan() -> [Leftover] {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser
+        guard let protected = protectedPatterns() else { return [] }
         let installed = installedIDs()
-        let protected = ConfigList.whitelist.read().map { ($0 as NSString).expandingTildeInPath }
         let trashed = trashedApps()
         var found: [String: [Leftover.Item]] = [:]
         var used: [String: Date] = [:]
@@ -70,17 +145,22 @@ enum LeftoverScanner {
             guard let names = try? fm.contentsOfDirectory(atPath: dir.path) else { continue }
             for name in names {
                 guard let id = bundleID(fromEntry: name), !inUse(id, installed: installed) else { continue }
+                let inTrash = trashed[id.lowercased()] != nil
+                if kind == .data || kind == .settings, !inTrash { continue }
                 let path = dir.appendingPathComponent(name).path
-                guard !protected.contains(where: { fnmatch($0, path, 0) == 0 || path.hasPrefix($0 + "/") }) else { continue }
-                let modified = (try? fm.attributesOfItem(atPath: path)[.modificationDate] as? Date) ?? .distantPast
-                let age = kind == .data || kind == .settings ? dataAge : cacheAge
-                if Date().timeIntervalSince(modified) < age { continue }
+                // A link may lead to live data elsewhere; an unreadable date proves nothing.
+                guard !isProtected(path, by: protected),
+                      let attrs = try? fm.attributesOfItem(atPath: path), attrs[.type] as? FileAttributeType != .typeSymbolicLink,
+                      let modified = attrs[.modificationDate] as? Date,
+                      inTrash || Date().timeIntervalSince(modified) >= unusedFor else { continue }
                 found[id, default: []].append(.init(path: path, kind: kind, bytes: FolderSize.of(path)))
                 used[id] = max(used[id] ?? .distantPast, modified)
             }
         }
-        // A last check with LaunchServices catches apps outside the usual folders.
+        guard let moleKeeps = protectedByMole(Array(found.keys)) else { return [] }
         return found.compactMap { id, items in
+            if moleKeeps.contains(id) { return nil }
+            // A last check with LaunchServices catches apps outside the folders Spotlight sees.
             if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id),
                !url.path.contains("/.Trash/"), fm.fileExists(atPath: url.path) { return nil }
             return Leftover(bundleID: id, items: items.sorted { $0.bytes > $1.bytes }, lastUsed: used[id] ?? .distantPast,
@@ -89,10 +169,24 @@ enum LeftoverScanner {
         .sorted { $0.bytes > $1.bytes }
     }
 
-    /// Bundle ids of every app in the usual places and every running one, lowercased.
+    /// Bundle ids of every app Spotlight knows (all indexed volumes), in the usual folders and
+    /// running now, lowercased. Apps in the Trash do not count.
     nonisolated static func installedIDs() -> Set<String> {
         let fm = FileManager.default
         var ids = Set(NSWorkspace.shared.runningApplications.compactMap { $0.bundleIdentifier?.lowercased() })
+        let mdfind = Process()
+        mdfind.executableURL = URL(fileURLWithPath: "/usr/bin/mdfind")
+        mdfind.arguments = ["kMDItemContentType == 'com.apple.application-bundle'"]
+        let out = Pipe()
+        mdfind.standardOutput = out
+        mdfind.standardError = FileHandle.nullDevice
+        if (try? mdfind.run()) != nil {
+            let paths = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).split(separator: "\n")
+            mdfind.waitUntilExit()
+            for path in paths where !path.contains("/.Trash/") {
+                if let id = Bundle(path: String(path))?.bundleIdentifier { ids.insert(id.lowercased()) }
+            }
+        }
         let roots = ["/Applications", "/System/Applications", "/Library/Application Support",
                      fm.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path,
                      fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support").path]
@@ -126,6 +220,7 @@ enum LeftoverScanner {
 final class LeftoverStore: ObservableObject {
     @Published var leftovers: [Leftover]?
     @Published var scanning = false
+    private(set) var checkedAt: Date?
     var onBusyChange: ((Bool) -> Void)?
 
     func load() async {
@@ -133,18 +228,18 @@ final class LeftoverStore: ObservableObject {
         scanning = true
         onBusyChange?(true)
         leftovers = await Task.detached { LeftoverScanner.scan() }.value
+        checkedAt = Date()
         scanning = false
         onBusyChange?(false)
     }
 
-    /// Moves what is still a leftover to the Trash, after checking again that its app is gone.
+    /// Moves what is still a leftover to the Trash: a fresh scan with every rule (installed and
+    /// running apps, LaunchServices, protected paths, age) must still offer each item.
     /// Returns the paths that could not be moved.
     func trash(_ chosen: [Leftover]) async -> [String] {
         let failed = await Task.detached {
-            let installed = LeftoverScanner.installedIDs()
-            let paths = chosen.filter { !LeftoverScanner.inUse($0.bundleID, installed: installed) }
-                .flatMap(\.items).map(\.path).filter { FileManager.default.fileExists(atPath: $0) }
-            return Trash.move(paths)
+            let still = Set(LeftoverScanner.scan().flatMap(\.items).map(\.path))
+            return Trash.move(chosen.flatMap(\.items).map(\.path).filter(still.contains))
         }.value
         await load()
         return failed
@@ -164,9 +259,9 @@ struct LeftoversView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             HeroCard(glow: .ember, label: "Leftovers of removed apps", bytes: store.leftovers.map { $0.map(\.bytes).reduce(0, +) },
-                     detail: store.leftovers.map { "\($0.count) app\($0.count == 1 ? "" : "s") that are gone left caches, logs or settings behind." }
-                        ?? "Looks through your Library for what removed apps left.",
-                     scanning: store.scanning, progress: "Looking through your Library") {
+                     detail: (store.leftovers.map { "\($0.count) app\($0.count == 1 ? " that is" : "s that are") gone left files behind. " } ?? "")
+                        + "Caches, logs and web data unused for a week; settings and data too while the app is in the Trash. Everything goes to the Trash.",
+                     scanning: store.scanning, progress: "Looking through your Library", checked: store.checkedAt) {
                 Button("Rescan") { Task { await store.load() } }.buttonStyle(.pillSecondary).disabled(store.scanning)
                     .keyboardShortcut("r", modifiers: .command)
                 Button(allSelected ? "Select none" : "Select all") {
@@ -190,19 +285,22 @@ struct LeftoversView: View {
                         if let app = left.trashedApp {
                             AppIcon(path: app, size: 38)
                         } else {
-                            Image(systemName: "app.dashed").font(.system(size: 22, weight: .light))
-                                .frame(width: 38, height: 38).foregroundStyle(Theme.secondaryText)
+                            Image(systemName: left.symbol).font(.system(size: 16, weight: .medium))
+                                .foregroundStyle(Glow.ember.color)
+                                .frame(width: 38, height: 38)
+                                .background(Circle().fill(Glow.ember.color.opacity(0.14)))
                         }
                         VStack(alignment: .leading, spacing: 3) {
                             Text(left.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
-                            Text("\(left.kinds.map(\.rawValue).joined(separator: ", ")) · used \(left.lastUsed.formatted(.relative(presentation: .named)))")
+                            Text(left.bundleID).font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(Theme.tertiaryText).lineLimit(1).truncationMode(.middle)
+                            Text("\(left.kinds.map(\.rawValue).joined(separator: ", ")) · changed \(left.lastUsed.formatted(.relative(presentation: .named, unitsStyle: .abbreviated)))")
                                 .caption().lineLimit(1)
                         }
                         Spacer(minLength: 8)
                         Text(left.bytes.bytesText).font(.system(size: 12)).monospacedDigit()
                             .frame(width: 78, alignment: .trailing)
                     }
-                    .help(left.bundleID)
                     .contextMenu {
                         Text(left.bundleID)
                         ForEach(left.items, id: \.path) { item in
@@ -213,7 +311,6 @@ struct LeftoversView: View {
                     }
                 }
             }
-            Text("Folders and files named after apps that are no longer on this Mac, unused for a week (settings and app data: 30 days). Some belong to tools without an app; their caches are safe to remove. Everything goes to the Trash.").caption()
         }
         .bottomBar(!selected.isEmpty) {
             SelectionBar(glow: .ember, title: "\(chosen.count) app\(chosen.count == 1 ? "" : "s") · \(chosen.map(\.bytes).reduce(0, +).bytesText)",
@@ -223,6 +320,7 @@ struct LeftoversView: View {
         }
         .confirmation($confirm)
         .onAppear { if store.leftovers == nil { Task { await store.load() } } }
+        .onChange(of: store.leftovers) { selected.formIntersection(Set(all.map(\.id))) }
     }
 
     private func toggle(_ left: Leftover) {
@@ -236,10 +334,7 @@ struct LeftoversView: View {
                         button: "Move to Trash") {
             let picked = chosen
             selected.removeAll()
-            Task {
-                failed = await store.trash(picked)
-                selected.formIntersection(Set(all.map(\.id)))
-            }
+            Task { failed = await store.trash(picked) }
         }
     }
 }
