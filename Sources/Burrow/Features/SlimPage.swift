@@ -13,7 +13,7 @@ struct SlimPage: View {
             HeroCard(glow: .magenta, label: "Intel code in universal apps", bytes: scan.report?.bytes,
                      detail: "Each app is slimmed on a copy that must pass code signing and Gatekeeper first. App updates bring the Intel code back.",
                      scanning: scan.scanning, progress: "Reading the architecture of every app",
-                     started: scan.startedAt, error: scan.error) {
+                     started: scan.startedAt, checked: scan.finishedAt, error: scan.error) {
                 ScanButton(scanning: scan.scanning, start: scan.start, stop: scan.cancel)
                 Button(allSelected ? "Select none" : "Select all") {
                     selected = allSelected ? [] : Set((scan.report?.apps ?? []).map(\.name))

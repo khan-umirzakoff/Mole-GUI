@@ -7,17 +7,43 @@ final class AppCatalog: ObservableObject {
     @Published var apps: [InstalledApp] = []
     @Published var loading = false
     @Published var error: String?
+    private(set) var checkedAt: Date?
+    private static let cacheKey = "uninstall --list"
 
+    init() {
+        if let saved = ResultCache.load(Self.cacheKey), let list = try? Mole.decode([InstalledApp].self, from: saved.data) {
+            apps = list
+            checkedAt = saved.date
+        }
+    }
+
+    private var loadTask: Task<Void, Never>?
+
+    /// A second caller waits for the list already loading instead of starting another.
     func load() async {
-        guard !loading else { return }
+        if let loadTask { return await loadTask.value }
+        let task = Task { await fetch() }
+        loadTask = task
+        await task.value
+        loadTask = nil
+    }
+
+    private func fetch() async {
         loading = true
         error = nil
         defer { loading = false }
         do {
-            apps = try await Mole.json([InstalledApp].self, ["uninstall", "--list"])
+            let data = try await Mole.capture(["uninstall", "--list"])
+            apps = try Mole.decode([InstalledApp].self, from: data)
+            checkedAt = Date()
+            ResultCache.save(data, as: Self.cacheKey)
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    func refreshIfStale() async {
+        if ResultCache.isStale(checkedAt) { await load() }
     }
 }
 
@@ -41,6 +67,8 @@ enum FolderSize {
 struct UninstallPage: View {
     @EnvironmentObject private var model: AppModel
     @ObservedObject var catalog: AppCatalog
+    let leftovers: LeftoverStore
+    @AppStorage("uninstall.showLeftovers") private var showLeftovers = false
     @ViewState private var query = ""
     @ViewState private var selected = Set<String>()
     @AppStorage("uninstall.sortBySize") private var sortBySize = true
@@ -60,10 +88,22 @@ struct UninstallPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
+            PillPicker(selection: $showLeftovers, options: [("Apps", false), ("Leftovers", true)])
+            if showLeftovers {
+                LeftoversView(store: leftovers).transition(.opacity)
+            } else {
+                installed.transition(.opacity)
+            }
+        }
+    }
+
+    private var installed: some View {
+        VStack(alignment: .leading, spacing: 20) {
             HStack(spacing: 12) {
                 SearchField(text: $query, prompt: catalog.apps.isEmpty ? "Search apps" : "Search \(catalog.apps.count) apps",
                             focused: $searchFocused)
                 PillPicker(selection: $sortBySize, options: [("Largest", true), ("A–Z", false)])
+                if let at = catalog.checkedAt, !catalog.loading { CheckedAgo(date: at) }
                 CircleIconButton(symbol: "arrow.clockwise", help: "Reload the app list") { Task { await catalog.load() } }
                     .keyboardShortcut("r", modifiers: .command)
                     .disabled(catalog.loading)
@@ -141,7 +181,10 @@ struct UninstallPage: View {
                         button: "Uninstall") {
             model.run("Uninstalling", ["uninstall"] + flags + names) {
                 selected.removeAll()
-                Task { await catalog.load() }
+                Task {
+                    await catalog.load()
+                    await leftovers.load()
+                }
             }
         }
     }

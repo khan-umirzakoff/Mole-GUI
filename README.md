@@ -6,6 +6,10 @@ remove project build folders and old installers, slim universal apps, and watch 
 
 ![Overview](docs/overview.jpg)
 
+**Demo (41 s):** every page and the moves between them.
+
+[![Burrow demo video](docs/demo-poster.jpg)](docs/demo.mp4)
+
 ## Why
 
 Mole is excellent but lives in the terminal, and its own app is paid. Burrow puts a native
@@ -20,7 +24,7 @@ pick) go to the Trash.
 |---|---|---|
 | Overview | `mo status --watch` | Live free space, health score, CPU, memory, battery, network, busiest processes |
 | Clean | `mo clean` | Dry-run preview by category, then one-click clean (system caches optional, asks for your password natively) |
-| Uninstall | `mo uninstall` | All apps with sizes, multi-select, preview leftovers, Trash or permanent |
+| Uninstall | `mo uninstall` | All apps with sizes, multi-select, preview leftovers, Trash or permanent; **Leftovers of removed apps**: caches, logs, web data and settings of apps that are already gone, grouped per app, to the Trash |
 | Optimize | `mo optimize` | Pending maintenance steps and performance diagnosis |
 | Disk Map | `mo analyze --json` | Treemap with drill-down, reveal in Finder, move to Trash |
 | Projects | `mo purge` | Build folders grouped by project, remove all or a selection |
@@ -30,7 +34,10 @@ pick) go to the Trash.
 | Settings | config files, `mo touchid` | Protected paths, project scan folders, Touch ID for sudo, full removal |
 
 Every scan is a Mole dry run that keeps going while you look at other pages; the sidebar marks
-the pages still working, and the page shows what Mole has found so far.
+the pages still working, and the page shows what Mole has found so far. Results are kept between
+launches: pages show the last result at once and never re-scan on their own. At launch, anything
+missing or older than six hours is checked again in the background, one scan at a time; ⌘R
+re-scans whenever you want.
 
 ### Keyboard
 
@@ -46,8 +53,9 @@ the pages still working, and the page shows what Mole has found so far.
 
 ## Install
 
-Download `Burrow.zip` from [Releases](../../releases), unzip, move `Burrow.app` to Applications.
-The app is ad-hoc signed, so the first time right-click it and choose **Open**, or run:
+Download `Burrow.dmg` from [Releases](../../releases), open it and drag Burrow to Applications.
+The app is ad-hoc signed (not notarized), so macOS blocks the first launch: open
+**System Settings → Privacy & Security** and press **Open Anyway** next to Burrow, or run:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Burrow.app
@@ -69,6 +77,7 @@ Only the Xcode Command Line Tools are needed (no Xcode):
 ```bash
 swift test
 scripts/bundle.sh     # → build/Burrow.app
+scripts/dmg.sh        # → build/Burrow.dmg
 BURROW_SLOW_TESTS=1 swift test --filter uninstallPreview   # drives a real Mole dry run in a terminal
 ```
 

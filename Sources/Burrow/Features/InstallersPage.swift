@@ -52,6 +52,7 @@ enum InstallerScanner {
 final class InstallerStore: ObservableObject {
     @Published var files: [InstallerFile]?
     @Published var scanning = false
+    private(set) var checkedAt: Date?
     var onBusyChange: ((Bool) -> Void)?
 
     func load() async {
@@ -59,6 +60,7 @@ final class InstallerStore: ObservableObject {
         scanning = true
         onBusyChange?(true)
         files = await Task.detached { InstallerScanner.scan() }.value
+        checkedAt = Date()
         scanning = false
         onBusyChange?(false)
     }
@@ -80,7 +82,8 @@ struct InstallersPage: View {
             HeroCard(glow: .ember, label: "Installer files", bytes: files.map { _ in total },
                      detail: files.map { "\($0.count) disk image\($0.count == 1 ? "" : "s") and packages in Downloads, Desktop, Mail and Telegram." }
                         ?? "Looks in Downloads, Desktop, Documents, Mail and Telegram.",
-                     scanning: store.scanning, progress: "Looking in Downloads, Desktop, Mail and Telegram") {
+                     scanning: store.scanning, progress: "Looking in Downloads, Desktop, Mail and Telegram",
+                     checked: store.checkedAt) {
                 Button("Rescan") { Task { await load() } }.buttonStyle(.pillSecondary).disabled(store.scanning)
                     .keyboardShortcut("r", modifiers: .command)
                 Button(allSelected ? "Select none" : "Select all") {

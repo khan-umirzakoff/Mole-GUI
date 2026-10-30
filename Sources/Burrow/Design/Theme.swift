@@ -87,50 +87,44 @@ struct GlowSurface: View {
 
 // MARK: - Background
 
-/// A faint dot grid like the reference screens; drawn once per size.
+/// A faint dot grid like the reference screens: one small tile repeated by the GPU, so the
+/// window never redraws thousands of dots.
 struct DotGrid: View {
-    var spacing: CGFloat = 16
-    var opacity: Double = 0.07
+    private static let tile: NSImage = {
+        let spacing: CGFloat = 16, dot: CGFloat = 1.4
+        return NSImage(size: NSSize(width: spacing, height: spacing), flipped: false) { _ in
+            NSColor.white.withAlphaComponent(0.07).setFill()
+            NSBezierPath(ovalIn: NSRect(x: spacing / 2, y: spacing / 2, width: dot, height: dot)).fill()
+            return true
+        }
+    }()
 
     var body: some View {
-        Canvas { ctx, size in
-            var path = Path()
-            var y: CGFloat = spacing / 2
-            while y < size.height {
-                var x: CGFloat = spacing / 2
-                while x < size.width {
-                    path.addEllipse(in: CGRect(x: x, y: y, width: 1.4, height: 1.4))
-                    x += spacing
-                }
-                y += spacing
-            }
-            ctx.fill(path, with: .color(.white.opacity(opacity)))
-        }
-        .allowsHitTesting(false)
+        Image(nsImage: Self.tile).resizable(resizingMode: .tile).allowsHitTesting(false)
     }
 }
 
-/// Large, slow colour blobs behind the whole window.
+/// Two large soft colour pools behind the whole window; the main one takes the page's hue.
+/// Radial gradients instead of blurred circles: the same look at a fraction of the cost.
 struct AmbientBackground: View {
     var tint: Glow = .violet
-    @ViewState private var drift = false
 
     var body: some View {
         ZStack {
             Theme.background
-            Circle().fill(tint.color.opacity(0.28)).frame(width: 620).blur(radius: 160)
-                .offset(x: drift ? 300 : 400, y: drift ? -250 : -330)
-            Circle().fill(Glow.blue.color.opacity(0.16)).frame(width: 520).blur(radius: 170)
-                .offset(x: drift ? -360 : -460, y: drift ? 380 : 300)
+            pool(tint.color, opacity: 0.28, radius: 470).offset(x: 360, y: -300)
+            pool(Glow.blue.color, opacity: 0.16, radius: 430).offset(x: -420, y: 340)
             DotGrid()
         }
-        .drawingGroup()
         .ignoresSafeArea()
         .animation(.easeInOut(duration: 1.2), value: tint)
-        .onAppear {
-            guard !Motion.reduced else { return }
-            withAnimation(.easeInOut(duration: 18).repeatForever(autoreverses: true)) { drift = true }
-        }
+    }
+
+    private func pool(_ color: Color, opacity: Double, radius: CGFloat) -> some View {
+        Circle()
+            .fill(RadialGradient(colors: [color.opacity(opacity), color.opacity(opacity * 0.45), .clear],
+                                 center: .center, startRadius: 0, endRadius: radius))
+            .frame(width: radius * 2, height: radius * 2)
     }
 }
 

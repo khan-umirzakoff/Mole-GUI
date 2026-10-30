@@ -9,7 +9,10 @@ struct BurrowApp: App {
         WindowGroup("Burrow") {
             RootView()
                 .environmentObject(model)
-                .onAppear { delegate.model = model }
+                .onAppear {
+                    delegate.model = model
+                    if let folder = UserDefaults.standard.string(forKey: "tour") { Tour.start(model, into: folder) }
+                }
                 .frame(minWidth: 1080, minHeight: 700)
                 .preferredColorScheme(.dark)
         }

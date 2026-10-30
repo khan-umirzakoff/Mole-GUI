@@ -48,7 +48,9 @@ enum Treemap {
     }
 }
 
-/// Mole's size map of one folder at a time, with a trail for drilling down and back.
+/// Mole's size map of one folder at a time, with a trail for drilling down and back. Every
+/// folder measured this session is remembered, so going back is instant; the whole-Mac map is
+/// also kept between launches. Rescan (`reload`) is the only way to re-measure.
 @MainActor
 final class DiskMap: ObservableObject {
     @Published var trail: [String] = []
@@ -56,31 +58,76 @@ final class DiskMap: ObservableObject {
     @Published var loading = false
     @Published var error: String?
     @Published private(set) var startedAt = Date()
+    /// When the folder on screen was measured.
+    @Published private(set) var measuredAt: Date?
+    /// The folder `result` belongs to ("" for the whole Mac).
+    private var resultKey: String?
+    /// Measuring again the folder already on screen: the old map stays, dimmed, meanwhile.
+    var remeasuring: Bool { loading && result != nil && resultKey == (current ?? "") }
     var onBusyChange: ((Bool) -> Void)?
     private var task: Task<Void, Never>?
+    private var measured: [String: (result: AnalyzeResult, at: Date)] = [:]
+    private static let wholeMacKey = "analyze --json"
+    private var lastAttempt: Date?
 
     var current: String? { trail.last }
+
+    init() {
+        if let saved = ResultCache.load(Self.wholeMacKey), let r = try? Mole.decode(AnalyzeResult.self, from: saved.data) {
+            measured[""] = (r, saved.date)
+        }
+    }
 
     /// Maps `path` below the current trail; `nil` maps the whole Mac.
     func open(_ path: String?) {
         if let path { trail.append(path) } else { trail = [] }
-        reload()
+        show()
     }
 
     /// Starts a fresh trail at a top-level place.
     func jump(to path: String?) {
         trail = path.map { [$0] } ?? []
-        reload()
+        show()
     }
 
     func back(to index: Int) {
         trail = Array(trail.prefix(index + 1))
+        show()
+    }
+
+    /// Shows the current folder: the remembered map when there is one, else measures it.
+    func show() {
+        guard let hit = measured[current ?? ""] else { return reload() }
+        if task != nil { stop() }
+        result = hit.result
+        resultKey = current ?? ""
+        measuredAt = hit.at
+        error = nil
+    }
+
+    /// Measures the whole Mac in the background when its map is missing or old, while the
+    /// whole-Mac view is on screen. It runs like Rescan (progress, sidebar dot, ⌘R does not start
+    /// a second one); deeper in a folder it waits for the next return to the app.
+    func refreshIfStale() async {
+        guard task == nil, trail.isEmpty, ResultCache.isStale(measured[""]?.at), ResultCache.isStale(lastAttempt) else { return }
+        let started = Date()
+        reload()
+        await task?.value
+        // Navigating away cancels it; then it is tried again on the next return to the app.
+        if error != nil || !ResultCache.isStale(measured[""]?.at) { lastAttempt = started }
+    }
+
+    /// Everything measured is out of date after something was trashed; the current folder is measured again.
+    func forgetAndReload() {
+        measured.removeAll()
+        ResultCache.markStale(Self.wholeMacKey)
         reload()
     }
 
-    /// Maps the current folder. A newer request replaces an older one still measuring.
+    /// Measures the current folder. A newer request replaces an older one still measuring.
     func reload() {
         task?.cancel()
+        let key = current ?? ""
         let args = ["analyze", "--json"] + (current.map { [$0] } ?? [])
         loading = true
         error = nil
@@ -88,17 +135,34 @@ final class DiskMap: ObservableObject {
         onBusyChange?(true)
         task = Task {
             do {
-                let r = try await Mole.json(AnalyzeResult.self, args)
+                let data = try await Mole.capture(args)
+                let r = try Mole.decode(AnalyzeResult.self, from: data)
                 guard !Task.isCancelled else { return }
+                remember(r, data: data, for: key)
                 result = r
+                resultKey = key
+                measuredAt = Date()
             } catch {
                 guard !Task.isCancelled else { return }
                 result = nil
                 self.error = error.localizedDescription
             }
+            task = nil
             loading = false
             onBusyChange?(false)
         }
+    }
+
+    private func stop() {
+        task?.cancel()
+        task = nil
+        loading = false
+        onBusyChange?(false)
+    }
+
+    private func remember(_ r: AnalyzeResult, data: Data, for key: String) {
+        measured[key] = (r, Date())
+        if key.isEmpty { ResultCache.save(data, as: Self.wholeMacKey) }
     }
 }
 
@@ -209,14 +273,14 @@ struct AnalyzePage: View {
                     .transition(.blurFade)
             }
 
-            if isOverview, !map.loading, map.error == nil {
-                overview
+            if isOverview, !map.loading || map.remeasuring, map.error == nil {
+                overview.opacity(map.remeasuring ? 0.5 : 1).animation(Motion.quick, value: map.remeasuring)
             } else {
                 GlowCard(glow: .blue, style: .plain, padding: 10) {
                     GeometryReader { geo in
                         // Nothing under the veil: the previous folder (or the whole-Mac tour) would
                         // show through as the wrong map.
-                        let tiles = map.loading ? [] : tiles
+                        let tiles = map.loading && !map.remeasuring ? [] : tiles
                         let rects = Treemap.layout(tiles.map { Double($0.size) }, in: CGRect(origin: .zero, size: geo.size))
                         ZStack(alignment: .topLeading) {
                             ForEach(Array(tiles.enumerated()), id: \.element.id) { i, t in
@@ -225,8 +289,9 @@ struct AnalyzePage: View {
                         }
                     }
                     .animation(Motion.spring, value: tiles.map(\.id))
+                    .opacity(map.remeasuring ? 0.5 : 1)
                     .overlay {
-                        if map.loading {
+                        if map.loading, !map.remeasuring {
                             VStack(spacing: 10) {
                                 ProgressView().tint(.white)
                                 Text("Mole is measuring \(currentName)…").font(.system(size: 13, weight: .medium))
@@ -246,11 +311,11 @@ struct AnalyzePage: View {
                 }
                 .frame(height: 460)
 
-                if !entries.isEmpty, !map.loading { list }
+                if !entries.isEmpty, !map.loading || map.remeasuring { list }
             }
         }
         .confirmation($confirm)
-        .onAppear { if map.result == nil, !map.loading, map.error == nil { map.reload() } }
+        .onAppear { if map.result == nil, !map.loading, map.error == nil { map.show() } }
         .onChange(of: map.trail) { trashError = nil }
     }
 
@@ -348,6 +413,17 @@ struct AnalyzePage: View {
                 .foregroundStyle(i == map.trail.count - 1 ? .white : Theme.secondaryText)
             }
             Spacer()
+            if map.remeasuring {
+                ScanningBadge(started: map.startedAt)
+                Text("·").foregroundStyle(Theme.tertiaryText)
+            } else if let at = map.measuredAt, !map.loading {
+                CheckedAgo(date: at)
+                Button("Rescan") { map.reload() }.buttonStyle(.plain)
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
+                    .keyboardShortcut("r", modifiers: .command)
+                    .help("Measure this folder again (⌘R)")
+                Text("·").foregroundStyle(Theme.tertiaryText)
+            }
             if isOverview {
                 if let used = Self.usedOnDisk { Text("\(used.bytesText) used on this Mac").font(.system(size: 13, weight: .semibold)) }
             } else if let total = map.result?.entries?.map(\.size).reduce(0, +), total > 0 {
@@ -424,7 +500,7 @@ struct AnalyzePage: View {
                                 button: "Move to Trash") {
                     if Trash.move([entry.path]).isEmpty {
                         trashError = nil
-                        map.reload()
+                        map.forgetAndReload()
                     } else {
                         withAnimation(Motion.quick) {
                             trashError = "\(entry.name) could not be moved to the Trash. It may belong to macOS or another user."

@@ -48,16 +48,25 @@ enum Mole {
     nonisolated(unsafe) private static var livePIDs = Set<pid_t>()
     private static let liveLock = NSLock()
 
-    static func track(pid: pid_t) { liveLock.withLock { _ = livePIDs.insert(pid) } }
+    nonisolated(unsafe) private static var shuttingDown = false
+
+    /// A process that registers after `terminateAll` took its list is stopped at once, the same way.
+    static func track(pid: pid_t) {
+        let late = liveLock.withLock { livePIDs.insert(pid); return shuttingDown }
+        if late { stop(tree(pid)) }
+    }
     static func untrack(pid: pid_t) { liveLock.withLock { _ = livePIDs.remove(pid) } }
 
     /// Stops every Mole process the app started, for good: Burrow is going away and nothing
     /// may keep running (or keep waiting at a prompt) without it. Interactive Mole scripts trap
     /// TERM and HUP, so whatever survives a short grace period is killed.
     static func terminateAll() {
-        let roots = liveLock.withLock { livePIDs }
+        let roots = liveLock.withLock { shuttingDown = true; return livePIDs }
         // Collect the whole tree first: children move to launchd once their parent is gone.
-        let all = roots.flatMap(tree)
+        stop(roots.flatMap(tree))
+    }
+
+    private static func stop(_ all: [pid_t]) {
         guard !all.isEmpty else { return }
         all.forEach { kill($0, SIGHUP); kill($0, SIGTERM) }
         usleep(400_000)
@@ -148,7 +157,10 @@ enum Mole {
     }
 
     static func json<T: Decodable>(_ type: T.Type, _ args: [String]) async throws -> T {
-        let data = try await capture(args)
+        try decode(T.self, from: try await capture(args))
+    }
+
+    static func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
         // Mole may print a banner before the JSON; decode from the first brace or bracket.
         let start = data.firstIndex(where: { $0 == UInt8(ascii: "{") || $0 == UInt8(ascii: "[") }) ?? data.startIndex
         return try JSONDecoder().decode(T.self, from: data[start...])

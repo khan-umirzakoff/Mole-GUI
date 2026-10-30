@@ -45,5 +45,14 @@ screenshots of every page and the diff, never by Codex (no design taste); Codex 
 engine/backend code.
 
 ## Releases
-GitHub releases carry `Burrow.zip` (`ditto -c -k --keepParent build/Burrow.app`). Bump `VERSION`,
-build, test, then `gh release create v<version>`.
+GitHub releases carry `Burrow.dmg` (`scripts/dmg.sh`) and `Burrow.zip`
+(`ditto -c -k --keepParent build/Burrow.app`). Bump `VERSION`, build, test, then
+`gh release create v<version>`.
+`scripts/demo-video.sh` re-records `docs/demo.mp4` (the `-tour` walk, screen-recorded with
+`screencapture -v`; `cacheDisplay` misses SwiftUI transitions). The window must stay uncovered ~45 s.
+
+## Performance
+Nothing may animate forever behind the content: a repeating animation inside a large layer makes
+SwiftUI redraw that layer every frame (v0.2.0 idled at 20–40% CPU from a drifting background).
+Check idle CPU with `top -pid` after visual changes. Scan results live in `ResultCache`
+(`~/Library/Caches/uz.khan.burrow`); pages never re-scan on appear.

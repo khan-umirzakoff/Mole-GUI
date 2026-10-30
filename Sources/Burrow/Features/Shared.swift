@@ -1,5 +1,43 @@
 import SwiftUI
 
+/// The last result of each scan, kept between launches in Burrow's own cache folder (the
+/// app's uninstaller removes it). Pages show it at once; a scan runs again only when the user
+/// asks or, in the background at launch, when the result is older than `staleAfter`.
+enum ResultCache {
+    static let staleAfter: TimeInterval = 6 * 3600
+    static let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent(Bundle.main.bundleIdentifier ?? "uz.khan.burrow")
+
+    static func save(_ data: Data, as key: String) {
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? data.write(to: folder.appendingPathComponent(key), options: .atomic)
+    }
+
+    /// The saved output and when it was saved.
+    static func load(_ key: String) -> (data: Data, date: Date)? {
+        let url = folder.appendingPathComponent(key)
+        guard let data = try? Data(contentsOf: url),
+              let date = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate else { return nil }
+        return (data, date)
+    }
+
+    /// The saved result no longer matches the disk (the app removed something itself): it stays
+    /// as the last known result but counts as old, so the next launch checks it again.
+    static func markStale(_ key: String) {
+        try? FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-staleAfter - 60)],
+                                                ofItemAtPath: folder.appendingPathComponent(key).path)
+    }
+
+    /// When a scan was last started, kept on disk so a scan that keeps failing (a scan folder
+    /// that times out) is not walked again on every launch.
+    static func lastAttempt(_ key: String) -> Date? { load(key + ".attempt")?.date }
+    static func noteAttempt(_ key: String) { save(Data(), as: key + ".attempt") }
+
+    static func isStale(_ date: Date?) -> Bool {
+        date.map { Date().timeIntervalSince($0) > staleAfter } ?? true
+    }
+}
+
 /// Runs a Mole dry run with pipes and keeps the parsed result. The run belongs to the app,
 /// not to a page: leaving the page does not stop it, and the result is there on return.
 @MainActor
@@ -17,6 +55,8 @@ final class Scan<Report>: ObservableObject {
     var onBusyChange: ((Bool) -> Void)?
 
     private let args: [String]
+    private let cacheKey: String
+
     private let parse: (String) -> Report
     private let progressFile: URL?
     private var task: Task<Void, Never>?
@@ -28,6 +68,11 @@ final class Scan<Report>: ObservableObject {
         self.args = args
         self.progressFile = progressFile
         self.parse = parse
+        cacheKey = args.joined(separator: " ")
+        if let saved = ResultCache.load(cacheKey) {
+            report = parse(String(decoding: saved.data, as: UTF8.self))
+            finishedAt = saved.date
+        }
     }
 
     /// The newest result: the finished report, or what the running scan found so far.
@@ -37,7 +82,15 @@ final class Scan<Report>: ObservableObject {
 
     func start() {
         guard task == nil else { return }
+        ResultCache.noteAttempt(cacheKey)
         task = Task { await perform(); task = nil }
+    }
+
+    /// Scans again when there is no result yet or it is old; returns once the scan is done.
+    func refreshIfStale() async {
+        guard task != nil || (ResultCache.isStale(finishedAt) && ResultCache.isStale(ResultCache.lastAttempt(cacheKey))) else { return }
+        start()
+        await task?.value
     }
 
     /// Stops a running scan and keeps the previous result.
@@ -48,6 +101,8 @@ final class Scan<Report>: ObservableObject {
         guard var r = report else { return }
         change(&r)
         report = r
+        // The adjusted report cannot be saved as Mole's output; the next launch scans again.
+        ResultCache.markStale(cacheKey)
     }
 
     private func perform() async {
@@ -67,8 +122,11 @@ final class Scan<Report>: ObservableObject {
         }
         do {
             let data = try await Mole.capture(args) { [weak self] line in self?.ingest(line) }
+            // Stopped after Mole finished but before this resumed: keep the previous result.
+            guard !Task.isCancelled else { return }
             report = parse(String(decoding: data, as: UTF8.self))
             finishedAt = Date()
+            ResultCache.save(data, as: cacheKey)
         } catch {
             // A stopped scan is not an error; the last good result stays.
             if !Task.isCancelled { self.error = error.localizedDescription }
@@ -110,6 +168,19 @@ final class Scan<Report>: ObservableObject {
     }
 }
 
+/// "Checked 5 minutes ago" that keeps itself current while the window sits idle.
+struct CheckedAgo: View {
+    let date: Date
+
+    var body: some View {
+        TimelineView(.everyMinute) { context in
+            // Seconds would sit stale between minute ticks.
+            Text(context.date.timeIntervalSince(date) < 60 ? "Checked just now"
+                 : "Checked \(date.formatted(.relative(presentation: .named)))").caption()
+        }
+    }
+}
+
 /// The large hero card at the top of every tool page. While Mole scans it shows the total
 /// found so far, the section Mole is in and how long it has been running.
 struct HeroCard<Actions: View>: View {
@@ -122,6 +193,8 @@ struct HeroCard<Actions: View>: View {
     var scanning = false
     var progress = ""
     var started = Date()
+    /// When the result on screen was found; it may come from an earlier launch.
+    var checked: Date?
     var error: String?
     @ViewBuilder var actions: Actions
 
@@ -132,7 +205,11 @@ struct HeroCard<Actions: View>: View {
                 HStack {
                     Text(label).cardTitle()
                     Spacer()
-                    if scanning { ScanningBadge(started: started).transition(.blurFade) }
+                    if scanning {
+                        ScanningBadge(started: started).transition(.blurFade)
+                    } else if let checked {
+                        CheckedAgo(date: checked).transition(.blurFade)
+                    }
                 }
                 .frame(height: 28)
                 HStack(alignment: .bottom, spacing: 16) {

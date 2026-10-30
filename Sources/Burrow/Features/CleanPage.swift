@@ -14,7 +14,7 @@ struct CleanPage: View {
                      bytes: scan.scanning ? report?.bytes : report?.total,
                      atLeast: !scan.scanning && (report?.potentialIsLowerBound ?? false),
                      detail: detail,
-                     scanning: scan.scanning, progress: progress, started: scan.startedAt, error: scan.error) {
+                     scanning: scan.scanning, progress: progress, started: scan.startedAt, checked: scan.finishedAt, error: scan.error) {
                 ScanButton(scanning: scan.scanning, start: scan.start, stop: scan.cancel)
                 Button("Clean now") { askToClean() }
                     .buttonStyle(.pill)
@@ -101,7 +101,11 @@ struct OptimizePage: View {
                     HStack {
                         Text("Maintenance").cardTitle()
                         Spacer()
-                        if scan.scanning { ScanningBadge(started: scan.startedAt).transition(.blurFade) }
+                        if scan.scanning {
+                            ScanningBadge(started: scan.startedAt).transition(.blurFade)
+                        } else if let at = scan.finishedAt {
+                            CheckedAgo(date: at).transition(.blurFade)
+                        }
                     }
                     .frame(height: 28)
                     HStack(alignment: .bottom, spacing: 16) {

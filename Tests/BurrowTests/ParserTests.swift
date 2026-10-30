@@ -251,3 +251,69 @@ struct SettingsTests {
         #expect(s[1].looksInterrupted)
     }
 }
+
+struct LeftoverTests {
+    @Test func bundleIDsFromLibraryNames() {
+        #expect(LeftoverScanner.bundleID(fromEntry: "com.tinyspeck.slackmacgap") == "com.tinyspeck.slackmacgap")
+        #expect(LeftoverScanner.bundleID(fromEntry: "com.foo.Bar.savedState") == "com.foo.Bar")
+        #expect(LeftoverScanner.bundleID(fromEntry: "com.foo.Bar.plist") == "com.foo.Bar")
+        #expect(LeftoverScanner.bundleID(fromEntry: "Slack") == nil)
+        #expect(LeftoverScanner.bundleID(fromEntry: "com.foo") == nil)
+        #expect(LeftoverScanner.bundleID(fromEntry: "Google.Chrome.x") == nil)
+        #expect(LeftoverScanner.bundleID(fromEntry: "com.foo..bar") == nil)
+        #expect(LeftoverScanner.bundleID(fromEntry: "com.foo bar.baz") == nil)
+    }
+
+    @Test func installedVendorsAndProtectedNamesStay() {
+        let installed: Set<String> = ["com.google.chrome", "com.tinyspeck.slackmacgap"]
+        #expect(LeftoverScanner.inUse("com.tinyspeck.slackmacgap", installed: installed))
+        #expect(LeftoverScanner.inUse("com.google.Keystone.Agent", installed: installed))
+        #expect(LeftoverScanner.inUse("com.apple.Safari", installed: []))
+        #expect(LeftoverScanner.inUse("com.agilebits.onepassword7", installed: []))
+        #expect(!LeftoverScanner.inUse("com.spotify.client", installed: installed))
+        // A vendor prefix must match whole parts: com.googlex is not Google.
+        #expect(!LeftoverScanner.inUse("com.googlex.app", installed: installed))
+    }
+
+    @Test func readableNames() {
+        #expect(Leftover.displayName("com.figma.Desktop") == "Figma Desktop")
+        #expect(Leftover.displayName("com.netease.mumu.nemux-global") == "Nemux Global")
+        #expect(Leftover.displayName("com.tw93.MoleApp") == "MoleApp")
+        #expect(Leftover.displayName("com.FluidApp.app") == "FluidApp App")
+        #expect(Leftover.displayName("net.imput.helium") == "Helium")
+    }
+
+    @Test func protectedPaths() {
+        let item = "/Users/me/Library/Caches/com.foo.Bar"
+        #expect(LeftoverScanner.isProtected(item, by: [item]))
+        #expect(LeftoverScanner.isProtected(item, by: ["/Users/me/Library/Caches"]))
+        #expect(LeftoverScanner.isProtected(item, by: ["/Users/*/Library/Caches/com.foo*"]))
+        #expect(LeftoverScanner.isProtected(item, by: [item + "/keep.db"]))
+        #expect(LeftoverScanner.isProtected(item, by: ["/Users/*/Library/Caches/com.foo.Bar/*"]))
+        #expect(!LeftoverScanner.isProtected(item, by: ["/Users/me/Library/Caches/com.other"]))
+        #expect(!LeftoverScanner.isProtected(item, by: ["/Users/me/Library/Logs"]))
+        // `*` crosses folders, as in Mole.
+        #expect(LeftoverScanner.isProtected(item, by: ["/Users/me/*/com.foo.Bar"]))
+    }
+
+    @Test func protectedFileDeepInside() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("burrow-\(UUID().uuidString)")
+        let item = root.appendingPathComponent("Caches/com.foo.Bar")
+        try FileManager.default.createDirectory(at: item.appendingPathComponent("a/b"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        FileManager.default.createFile(atPath: item.appendingPathComponent("a/b/keep.db").path, contents: Data())
+        #expect(LeftoverScanner.isProtected(item.path, by: [root.path + "/*/keep.db"]))
+        #expect(!LeftoverScanner.isProtected(item.path, by: [root.path + "/*/other.db"]))
+    }
+
+    @Test func moleProtectsItsSensitiveBundles() throws {
+        let kept = try #require(LeftoverScanner.protectedByMole(["com.authy.authy", "com.yubico.yubioath", "org.cups.PrintingPrefs", "com.tw93.MoleApp"]))
+        #expect(kept == ["com.authy.authy", "com.yubico.yubioath", "org.cups.PrintingPrefs"])
+    }
+
+    @Test func staleness() {
+        #expect(ResultCache.isStale(nil))
+        #expect(!ResultCache.isStale(Date()))
+        #expect(ResultCache.isStale(Date().addingTimeInterval(-ResultCache.staleAfter - 1)))
+    }
+}
