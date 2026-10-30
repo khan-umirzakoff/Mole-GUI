@@ -53,7 +53,7 @@ GitHub releases carry `Burrow.dmg` (`scripts/dmg.sh`) and `Burrow.zip`
 misses SwiftUI transitions); the window must stay uncovered ~45 s. `promo/` is the 17 s HyperFrames
 edit of that raw take: copy it to `promo/assets/screen.mov`, check the cut times in `index.html`, then
 `npx hyperframes@0.8.214 render promo -o build/promo.mp4` (and `-c gif.html` for the README GIF,
-`docs/demo.gif`, kept under 10 MB).
+`docs/demo.gif`: 880 px, 10 fps, Bayer dither, about 6 MB so it loads fast).
 
 ## Performance
 Nothing may animate forever behind the content: a repeating animation inside a large layer makes
