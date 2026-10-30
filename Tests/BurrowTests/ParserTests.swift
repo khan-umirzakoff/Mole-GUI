@@ -292,6 +292,18 @@ struct LeftoverTests {
         #expect(LeftoverScanner.isProtected(item, by: ["/Users/*/Library/Caches/com.foo.Bar/*"]))
         #expect(!LeftoverScanner.isProtected(item, by: ["/Users/me/Library/Caches/com.other"]))
         #expect(!LeftoverScanner.isProtected(item, by: ["/Users/me/Library/Logs"]))
+        // `*` crosses folders, as in Mole.
+        #expect(LeftoverScanner.isProtected(item, by: ["/Users/me/*/com.foo.Bar"]))
+    }
+
+    @Test func protectedFileDeepInside() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("burrow-\(UUID().uuidString)")
+        let item = root.appendingPathComponent("Caches/com.foo.Bar")
+        try FileManager.default.createDirectory(at: item.appendingPathComponent("a/b"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        FileManager.default.createFile(atPath: item.appendingPathComponent("a/b/keep.db").path, contents: Data())
+        #expect(LeftoverScanner.isProtected(item.path, by: [root.path + "/*/keep.db"]))
+        #expect(!LeftoverScanner.isProtected(item.path, by: [root.path + "/*/other.db"]))
     }
 
     @Test func moleProtectsItsSensitiveBundles() throws {

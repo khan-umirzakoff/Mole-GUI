@@ -60,6 +60,10 @@ final class DiskMap: ObservableObject {
     @Published private(set) var startedAt = Date()
     /// When the folder on screen was measured.
     @Published private(set) var measuredAt: Date?
+    /// The folder `result` belongs to ("" for the whole Mac).
+    private var resultKey: String?
+    /// Measuring again the folder already on screen: the old map stays, dimmed, meanwhile.
+    var remeasuring: Bool { loading && result != nil && resultKey == (current ?? "") }
     var onBusyChange: ((Bool) -> Void)?
     private var task: Task<Void, Never>?
     private var measured: [String: (result: AnalyzeResult, at: Date)] = [:]
@@ -96,31 +100,27 @@ final class DiskMap: ObservableObject {
         guard let hit = measured[current ?? ""] else { return reload() }
         if task != nil { stop() }
         result = hit.result
+        resultKey = current ?? ""
         measuredAt = hit.at
         error = nil
     }
 
-    /// Measures the whole Mac in the background when its map is missing or old.
-    /// On the whole-Mac view it runs like Rescan (progress, sidebar dot, ⌘R does not start a
-    /// second one); elsewhere it measures quietly and keeps the result for later.
+    /// Measures the whole Mac in the background when its map is missing or old, while the
+    /// whole-Mac view is on screen. It runs like Rescan (progress, sidebar dot, ⌘R does not start
+    /// a second one); deeper in a folder it waits for the next return to the app.
     func refreshIfStale() async {
-        guard task == nil, ResultCache.isStale(measured[""]?.at), ResultCache.isStale(lastAttempt) else { return }
-        lastAttempt = Date()
-        if trail.isEmpty {
-            reload()
-            await task?.value
-        } else if let data = try? await Mole.capture(["analyze", "--json"]),
-                  let r = try? Mole.decode(AnalyzeResult.self, from: data),
-                  (measured[""]?.at ?? .distantPast) < lastAttempt ?? .distantPast {
-            // Kept only if no newer whole-Mac map arrived meanwhile.
-            remember(r, data: data, for: "")
-        }
+        guard task == nil, trail.isEmpty, ResultCache.isStale(measured[""]?.at), ResultCache.isStale(lastAttempt) else { return }
+        let started = Date()
+        reload()
+        await task?.value
+        // Navigating away cancels it; then it is tried again on the next return to the app.
+        if error != nil || !ResultCache.isStale(measured[""]?.at) { lastAttempt = started }
     }
 
     /// Everything measured is out of date after something was trashed; the current folder is measured again.
     func forgetAndReload() {
         measured.removeAll()
-        ResultCache.forget(Self.wholeMacKey)
+        ResultCache.markStale(Self.wholeMacKey)
         reload()
     }
 
@@ -140,6 +140,7 @@ final class DiskMap: ObservableObject {
                 guard !Task.isCancelled else { return }
                 remember(r, data: data, for: key)
                 result = r
+                resultKey = key
                 measuredAt = Date()
             } catch {
                 guard !Task.isCancelled else { return }
@@ -272,14 +273,14 @@ struct AnalyzePage: View {
                     .transition(.blurFade)
             }
 
-            if isOverview, !map.loading, map.error == nil {
-                overview
+            if isOverview, !map.loading || map.remeasuring, map.error == nil {
+                overview.opacity(map.remeasuring ? 0.5 : 1).animation(Motion.quick, value: map.remeasuring)
             } else {
                 GlowCard(glow: .blue, style: .plain, padding: 10) {
                     GeometryReader { geo in
                         // Nothing under the veil: the previous folder (or the whole-Mac tour) would
                         // show through as the wrong map.
-                        let tiles = map.loading ? [] : tiles
+                        let tiles = map.loading && !map.remeasuring ? [] : tiles
                         let rects = Treemap.layout(tiles.map { Double($0.size) }, in: CGRect(origin: .zero, size: geo.size))
                         ZStack(alignment: .topLeading) {
                             ForEach(Array(tiles.enumerated()), id: \.element.id) { i, t in
@@ -288,8 +289,9 @@ struct AnalyzePage: View {
                         }
                     }
                     .animation(Motion.spring, value: tiles.map(\.id))
+                    .opacity(map.remeasuring ? 0.5 : 1)
                     .overlay {
-                        if map.loading {
+                        if map.loading, !map.remeasuring {
                             VStack(spacing: 10) {
                                 ProgressView().tint(.white)
                                 Text("Mole is measuring \(currentName)…").font(.system(size: 13, weight: .medium))
@@ -309,7 +311,7 @@ struct AnalyzePage: View {
                 }
                 .frame(height: 460)
 
-                if !entries.isEmpty, !map.loading { list }
+                if !entries.isEmpty, !map.loading || map.remeasuring { list }
             }
         }
         .confirmation($confirm)
@@ -411,10 +413,13 @@ struct AnalyzePage: View {
                 .foregroundStyle(i == map.trail.count - 1 ? .white : Theme.secondaryText)
             }
             Spacer()
-            if let at = map.measuredAt, !map.loading {
+            if map.remeasuring {
+                ScanningBadge(started: map.startedAt)
+                Text("·").foregroundStyle(Theme.tertiaryText)
+            } else if let at = map.measuredAt, !map.loading {
                 CheckedAgo(date: at)
                 Button("Rescan") { map.reload() }.buttonStyle(.plain)
-                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.accent)
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
                     .keyboardShortcut("r", modifiers: .command)
                     .help("Measure this folder again (⌘R)")
                 Text("·").foregroundStyle(Theme.tertiaryText)

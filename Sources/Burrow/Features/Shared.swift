@@ -21,10 +21,17 @@ enum ResultCache {
         return (data, date)
     }
 
-    /// The saved result no longer matches the disk (the app removed something itself).
-    static func forget(_ key: String) {
-        try? FileManager.default.removeItem(at: folder.appendingPathComponent(key))
+    /// The saved result no longer matches the disk (the app removed something itself): it stays
+    /// as the last known result but counts as old, so the next launch checks it again.
+    static func markStale(_ key: String) {
+        try? FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-staleAfter - 60)],
+                                                ofItemAtPath: folder.appendingPathComponent(key).path)
     }
+
+    /// When a scan was last started, kept on disk so a scan that keeps failing (a scan folder
+    /// that times out) is not walked again on every launch.
+    static func lastAttempt(_ key: String) -> Date? { load(key + ".attempt")?.date }
+    static func noteAttempt(_ key: String) { save(Data(), as: key + ".attempt") }
 
     static func isStale(_ date: Date?) -> Bool {
         date.map { Date().timeIntervalSince($0) > staleAfter } ?? true
@@ -49,9 +56,7 @@ final class Scan<Report>: ObservableObject {
 
     private let args: [String]
     private let cacheKey: String
-    /// A scan that keeps failing (a scan folder that times out) is not retried in the background
-    /// more often than a fresh result would be.
-    private var lastAttempt: Date?
+
     private let parse: (String) -> Report
     private let progressFile: URL?
     private var task: Task<Void, Never>?
@@ -77,13 +82,13 @@ final class Scan<Report>: ObservableObject {
 
     func start() {
         guard task == nil else { return }
-        lastAttempt = Date()
+        ResultCache.noteAttempt(cacheKey)
         task = Task { await perform(); task = nil }
     }
 
     /// Scans again when there is no result yet or it is old; returns once the scan is done.
     func refreshIfStale() async {
-        guard task != nil || (ResultCache.isStale(finishedAt) && ResultCache.isStale(lastAttempt)) else { return }
+        guard task != nil || (ResultCache.isStale(finishedAt) && ResultCache.isStale(ResultCache.lastAttempt(cacheKey))) else { return }
         start()
         await task?.value
     }
@@ -97,7 +102,7 @@ final class Scan<Report>: ObservableObject {
         change(&r)
         report = r
         // The adjusted report cannot be saved as Mole's output; the next launch scans again.
-        ResultCache.forget(cacheKey)
+        ResultCache.markStale(cacheKey)
     }
 
     private func perform() async {
@@ -168,8 +173,10 @@ struct CheckedAgo: View {
     let date: Date
 
     var body: some View {
-        TimelineView(.everyMinute) { _ in
-            Text("Checked \(date.formatted(.relative(presentation: .named)))").caption()
+        TimelineView(.everyMinute) { context in
+            // Seconds would sit stale between minute ticks.
+            Text(context.date.timeIntervalSince(date) < 60 ? "Checked just now"
+                 : "Checked \(date.formatted(.relative(presentation: .named)))").caption()
         }
     }
 }

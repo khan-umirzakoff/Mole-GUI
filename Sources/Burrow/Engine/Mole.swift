@@ -50,10 +50,10 @@ enum Mole {
 
     nonisolated(unsafe) private static var shuttingDown = false
 
-    /// A process that registers after `terminateAll` took its list is stopped at once.
+    /// A process that registers after `terminateAll` took its list is stopped at once, the same way.
     static func track(pid: pid_t) {
         let late = liveLock.withLock { livePIDs.insert(pid); return shuttingDown }
-        if late { signalTree(pid, SIGTERM) }
+        if late { stop(tree(pid)) }
     }
     static func untrack(pid: pid_t) { liveLock.withLock { _ = livePIDs.remove(pid) } }
 
@@ -63,7 +63,10 @@ enum Mole {
     static func terminateAll() {
         let roots = liveLock.withLock { shuttingDown = true; return livePIDs }
         // Collect the whole tree first: children move to launchd once their parent is gone.
-        let all = roots.flatMap(tree)
+        stop(roots.flatMap(tree))
+    }
+
+    private static func stop(_ all: [pid_t]) {
         guard !all.isEmpty else { return }
         all.forEach { kill($0, SIGHUP); kill($0, SIGTERM) }
         usleep(400_000)

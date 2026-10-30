@@ -84,16 +84,23 @@ enum LeftoverScanner {
     }
 
     /// Whether removing `path` would touch a protected entry: the entry itself, a folder above it,
-    /// or anything inside it (`~/x/com.foo/keep.db` protects `~/x/com.foo`). Globs work at any depth.
+    /// or anything inside it (`~/x/com.foo/keep.db` protects `~/x/com.foo`). As in Mole, `*` also
+    /// crosses folders.
     nonisolated static func isProtected(_ path: String, by patterns: [String]) -> Bool {
-        let parts = path.split(separator: "/")
-        return patterns.contains { pattern in
-            let p = pattern.split(separator: "/")
-            let n = min(p.count, parts.count)
-            // Cut both to the shorter depth: equal depth is the entry, a longer pattern is inside it,
-            // a shorter one is a folder above it.
-            return fnmatch("/" + p.prefix(n).joined(separator: "/"), "/" + parts.prefix(n).joined(separator: "/"), 0) == 0
+        guard !patterns.isEmpty else { return false }
+        func matches(_ s: String) -> Bool { patterns.contains { fnmatch($0, s, 0) == 0 } }
+        var up = path
+        while up.count > 1 {
+            if matches(up) { return true }
+            up = (up as NSString).deletingLastPathComponent
         }
+        // A pattern for what lies inside the entry (`…/com.foo/*`, `…/com.foo/keep.db`), even if nothing matches yet.
+        if matches(path + "/*") || patterns.contains(where: { String($0.prefix { !"*?[".contains($0) }).hasPrefix(path + "/") }) {
+            return true
+        }
+        guard let inside = FileManager.default.enumerator(atPath: path) else { return false }
+        for case let sub as String in inside where matches(path + "/" + sub) { return true }
+        return false
     }
 
     /// Mole's protection rules (`~/.config/mole/whitelist`) as absolute patterns; nil when the
@@ -116,7 +123,7 @@ enum LeftoverScanner {
     /// answer, and then nothing is offered.
     nonisolated static func protectedByMole(_ ids: [String]) -> Set<String>? {
         guard !ids.isEmpty else { return [] }
-        let script = #"source "$1/lib/core/app_protection.sh"; shift; for id in "$@"; do should_protect_data "$id" && echo "$id"; done; echo __done__"#
+        let script = #"source "$1/lib/core/app_protection.sh" || exit 3; declare -F should_protect_data >/dev/null || exit 4; shift; for id in "$@"; do should_protect_data "$id" && echo "$id"; done; echo __done__"#
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/bash")
         p.arguments = ["-c", script, "burrow", Mole.root.path] + ids
@@ -128,7 +135,7 @@ enum LeftoverScanner {
         let data = out.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
         let lines = String(decoding: data, as: UTF8.self).split(separator: "\n").map(String.init)
-        guard lines.last == "__done__" else { return nil }
+        guard p.terminationStatus == 0, lines.last == "__done__" else { return nil }
         return Set(lines.dropLast())
     }
 
@@ -136,7 +143,7 @@ enum LeftoverScanner {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser
         guard let protected = protectedPatterns() else { return [] }
-        let installed = installedIDs()
+        guard let installed = installedIDs() else { return [] }
         let trashed = trashedApps()
         var found: [String: [Leftover.Item]] = [:]
         var used: [String: Date] = [:]
@@ -170,8 +177,9 @@ enum LeftoverScanner {
     }
 
     /// Bundle ids of every app Spotlight knows (all indexed volumes), in the usual folders and
-    /// running now, lowercased. Apps in the Trash do not count.
-    nonisolated static func installedIDs() -> Set<String> {
+    /// running now, lowercased. Apps in the Trash do not count. nil when Spotlight did not answer
+    /// in time, and then nothing is offered.
+    nonisolated static func installedIDs() -> Set<String>? {
         let fm = FileManager.default
         var ids = Set(NSWorkspace.shared.runningApplications.compactMap { $0.bundleIdentifier?.lowercased() })
         let mdfind = Process()
@@ -181,8 +189,11 @@ enum LeftoverScanner {
         mdfind.standardOutput = out
         mdfind.standardError = FileHandle.nullDevice
         if (try? mdfind.run()) != nil {
+            let pid = mdfind.processIdentifier
+            DispatchQueue.global().asyncAfter(deadline: .now() + 30) { if mdfind.isRunning { kill(pid, SIGKILL) } }
             let paths = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).split(separator: "\n")
             mdfind.waitUntilExit()
+            guard mdfind.terminationReason == .exit else { return nil }
             for path in paths where !path.contains("/.Trash/") {
                 if let id = Bundle(path: String(path))?.bundleIdentifier { ids.insert(id.lowercased()) }
             }
@@ -223,8 +234,19 @@ final class LeftoverStore: ObservableObject {
     private(set) var checkedAt: Date?
     var onBusyChange: ((Bool) -> Void)?
 
+    private var loadTask: Task<Void, Never>?
+
+    /// A second caller (a Rescan during the launch scan, the refresh after trashing) waits for
+    /// the scan already running instead of being dropped.
     func load() async {
-        guard !scanning else { return }
+        if let loadTask { return await loadTask.value }
+        let task = Task { await scan() }
+        loadTask = task
+        await task.value
+        loadTask = nil
+    }
+
+    private func scan() async {
         scanning = true
         onBusyChange?(true)
         leftovers = await Task.detached { LeftoverScanner.scan() }.value
@@ -241,6 +263,8 @@ final class LeftoverStore: ObservableObject {
             let still = Set(LeftoverScanner.scan().flatMap(\.items).map(\.path))
             return Trash.move(chosen.flatMap(\.items).map(\.path).filter(still.contains))
         }.value
+        // A scan already running started before the move: wait for it, then look again.
+        if loadTask != nil { await load() }
         await load()
         return failed
     }
@@ -294,7 +318,7 @@ struct LeftoversView: View {
                             Text(left.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
                             Text(left.bundleID).font(.system(size: 11, design: .monospaced))
                                 .foregroundStyle(Theme.tertiaryText).lineLimit(1).truncationMode(.middle)
-                            Text("\(left.kinds.map(\.rawValue).joined(separator: ", ")) · changed \(left.lastUsed.formatted(.relative(presentation: .named, unitsStyle: .abbreviated)))")
+                            Text("\(left.kinds.map(\.rawValue).joined(separator: ", ")) · changed \(left.lastUsed.formatted(.relative(presentation: .named)))")
                                 .caption().lineLimit(1)
                         }
                         Spacer(minLength: 8)
