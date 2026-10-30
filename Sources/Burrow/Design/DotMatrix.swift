@@ -40,6 +40,7 @@ struct DotMatrixText: View {
             }
         }
         .frame(width: width, height: 7 * dot * 1.6)
+        .accessibilityElement()
         .accessibilityLabel(text)
     }
 
@@ -58,22 +59,41 @@ struct DotMatrixText: View {
 }
 
 /// A big dotted number with a plain unit next to it ("120.8" GB).
+/// `live` values (refreshed every few seconds) change in place; others cross-fade.
 struct MetricValue: View {
     let value: String
     var unit: String = ""
     var dot: CGFloat = 4
+    var live = false
 
     var body: some View {
-        HStack(alignment: .lastTextBaseline, spacing: 8) {
-            DotMatrixText(text: value, dot: dot)
-                .id(value)
-                .transition(.blurFade)
+        // Narrow cards (the minimum window size) get smaller dots instead of clipped digits.
+        ViewThatFits(in: .horizontal) {
+            row(dot)
+            row(dot * 0.8)
+            row(dot * 0.62)
+        }
+        .animation(live ? nil : Motion.spring, value: value)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(unit.isEmpty ? value : "\(value) \(unit)")
+    }
+
+    private func row(_ dot: CGFloat) -> some View {
+        // Bottom, not baseline: a canvas has no baseline, and aligning the unit's baseline to the
+        // dots' bottom pushed its descender below the row's frame.
+        HStack(alignment: .bottom, spacing: 8) {
+            if live {
+                DotMatrixText(text: value, dot: dot)
+            } else {
+                DotMatrixText(text: value, dot: dot)
+                    .id(value)
+                    .transition(.blurFade)
+            }
             if !unit.isEmpty {
                 Text(unit).font(.system(size: max(11, dot * 3), weight: .regular)).foregroundStyle(Theme.secondaryText)
-                    .contentTransition(.interpolate)
+                    .lineLimit(1).fixedSize()
             }
         }
-        .animation(Motion.spring, value: value)
     }
 }
 

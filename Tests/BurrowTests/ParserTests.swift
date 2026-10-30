@@ -30,6 +30,9 @@ struct ParserTests {
         #expect(r.bytes == 1_300_000_000) // manual items are not counted
         #expect(r.notes.count == 1)
         #expect(r.summary.count == 2)
+        #expect(r.potential == 10_630_000_000 && r.potentialIsLowerBound)
+        #expect(r.total == 10_630_000_000)
+        #expect(r.itemCount == 524 && r.categoryCount == 6)
     }
 
     @Test func purgeAndSlim() {
@@ -46,6 +49,7 @@ struct ParserTests {
         #expect(TerminalText.visible("⠋ Scanning\r\u{1B}[2K✓ Done") == "✓ Done")
         #expect(MoleSession.completeUTF8Length(Data("ab".utf8) + Data([0xE2, 0x9C])) == 2)
         #expect(MoleSession.completeUTF8Length(Data("a✓".utf8)) == 4)
+        #expect(TerminalText.lines("one\r\ntwo\r\n⠋ x\r✓ three") == ["one", "two", "✓ three"])
     }
 
     @Test func treemapFillsRect() {
@@ -58,5 +62,192 @@ struct ParserTests {
         #expect(InstallerScanner.isInstaller("Claude.dmg"))
         #expect(InstallerScanner.isInstaller("BssPluginSetup.app.zip"))
         #expect(!InstallerScanner.isInstaller("photos.zip"))
+    }
+}
+
+struct BehaviourTests {
+    @Test func zeroBytesStayNumeric() {
+        #expect(Int64(0).metric.value.allSatisfy { $0.isNumber || $0 == "." || $0 == "," })
+        #expect(ByteSize.format(0).contains("0"))
+        #expect(ByteSize.format(11_270_000_000) == "11.27 GB")
+    }
+
+    @Test func reportIdsSurviveReparse() {
+        let partial = "➤ User essentials\n  → User app cache · 36 items, 1.30GB dry\n"
+        let full = partial + "  → User app logs · 3 items, 3.7MB dry\n➤ Browsers\n  → Chrome cache · 11.1MB dry\n"
+        let a = SectionReport.parse(partial), b = SectionReport.parse(full)
+        #expect(a.sections[0].id == b.sections[0].id)
+        #expect(a.sections[0].items[0].id == b.sections[0].items[0].id)
+        #expect(Set(b.sections.flatMap(\.items).map(\.id)).count == 3)
+    }
+
+    @Test func scanStatusLine() {
+        #expect(Scan<SectionReport>.describe("→ User app cache · 38 items, 1.41GB dry") == "User app cache")
+        #expect(Scan<SectionReport>.describe("→ Arc Service Worker, would clean 40.1MB, 0 protected") == "Arc Service Worker")
+        #expect(Scan<PurgeReport>.describe("✓ [DRY RUN] ~/P/a/.expo, 4KB") == "~/P/a/.expo")
+    }
+
+    @Test func purgeNotes() {
+        let r = PurgeReport.parse("◎ Skipped 1 project scan root because scanning did not complete:\n  ~/P (status 124)\n✓ [DRY RUN] ~/P/a/node_modules, 1GB")
+        #expect(r.notes == ["Skipped 1 project scan root because scanning did not complete: ~/P"])
+        #expect(r.skippedRoots == ["~/P"])
+        #expect(r.artifacts.count == 1)
+    }
+
+    @Test func appSizeFromMole() throws {
+        let json = #"[{"name":"Steam","bundle_id":"com.valvesoftware.steam","source":"App","uninstall_name":"Steam","path":"/Applications/Steam.app","size":"11.3MB"}]"#
+        let apps = try JSONDecoder().decode([InstalledApp].self, from: Data(json.utf8))
+        #expect(apps[0].bytes == 11_300_000)
+    }
+
+    @Test func historyHidesPreviews() throws {
+        let json = #"{"sessions":[{"command":"clean-dry-run","started_at":"2026-10-30 03:20:08","items":9,"size":"1GB"},{"command":"uninstall","started_at":"2026-10-30 03:20:06","items":0,"size":"0B","actions":{"removed":0}},{"command":"clean","started_at":"2026-10-29 10:00:00","items":12,"size":"2GB"}]}"#
+        let h = try JSONDecoder().decode(HistoryResult.self, from: Data(json.utf8))
+        #expect(h.sessions?.filter(\.changedSomething).map(\.command) == ["clean"])
+        #expect(h.sessions?[0].title == "Clean")
+    }
+
+    @Test func quickRepliesForMolePrompts() {
+        let sudo = QuickReply.options(for: "→ System caches need sudo. Enter continue, Space skip:")
+        #expect(sudo.map(\.label) == ["Continue", "Skip"])
+        #expect(sudo[0].keys == "\r" && sudo[1].keys == " ")
+        let purge = QuickReply.options(for: "→ Remove 3 artifacts, 1.2GB  Enter confirm, ESC cancel:")
+        #expect(purge.map(\.label) == ["Confirm", "Cancel"])
+    }
+
+    /// Runs the bundled Mole; only harmless invocations (version, a rejected flag).
+    @Test func captureStreamsAndReportsFailure() async throws {
+        var seen: [String] = []
+        let data = try await Mole.capture(["--version"]) { seen.append($0) }
+        #expect(String(decoding: data, as: UTF8.self).contains("Mole version"))
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(seen.contains { $0.contains("Mole version") })
+        await #expect(throws: MoleError.self) { _ = try await Mole.capture(["purge", "--no-such-flag"]) }
+    }
+}
+
+/// Drives real Mole sessions in a pseudo-terminal, with harmless commands only.
+@MainActor
+struct SessionTests {
+    private func waitUntil(_ session: MoleSession, seconds: Double, _ done: (MoleSession) -> Bool) async {
+        let end = Date().addingTimeInterval(seconds)
+        while !done(session), Date() < end { try? await Task.sleep(for: .milliseconds(200)) }
+    }
+
+    @Test func touchIDStatusRunsInTerminal() async {
+        let s = MoleSession(title: "Touch ID", args: ["touchid", "status"])
+        s.start()
+        await waitUntil(s, seconds: 20) { $0.isFinished }
+        #expect(s.exitCode == 0)
+        #expect(s.lines.contains { $0.contains("Touch ID") })
+    }
+
+    /// Even when the app ignores INT/TERM/HUP, Mole must get default signals so Stop runs its
+    /// cleanup traps and exits on SIGINT, well before the SIGKILL fallback (137) at 4 s.
+    @Test func stopReachesMoleTrapsEvenIfTheAppIgnoresSignals() async {
+        for sig in [SIGINT, SIGTERM, SIGHUP] { signal(sig, SIG_IGN) }
+        defer { for sig in [SIGINT, SIGTERM, SIGHUP] { signal(sig, SIG_DFL) } }
+        let s = MoleSession(title: "Preview", args: ["uninstall", "--dry-run", "Steam"])
+        s.start()
+        try? await Task.sleep(for: .seconds(1.5))
+        let stopped = Date()
+        s.cancel()
+        await waitUntil(s, seconds: 6) { $0.isFinished }
+        #expect(s.isFinished)
+        #expect(Date().timeIntervalSince(stopped) < 3)
+        #expect(s.exitCode != 137)
+    }
+
+    /// Slow (Mole scans the app's files): BURROW_SLOW_TESTS=1 swift test --filter uninstallPreview
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["BURROW_SLOW_TESTS"] != nil))
+    func uninstallPreviewAsksAndCancels() async {
+        let s = MoleSession(title: "Preview", args: ["uninstall", "--dry-run", "Steam"])
+        s.start()
+        await waitUntil(s, seconds: 240) { if case .needsAnswer = $0.phase { return true }; return $0.isFinished }
+        print("PHASE:", s.phase)
+        print(s.lines.suffix(40).joined(separator: "\n"))
+        #expect(s.lines.contains { $0.contains("Steam.app") })
+        if case .needsAnswer(let q) = s.phase {
+            #expect(!q.contains("\n"))
+            #expect(QuickReply.options(for: q).map(\.label) == ["Confirm", "Cancel"])
+            s.cancel()
+        }
+        await waitUntil(s, seconds: 20) { $0.isFinished }
+        #expect(s.isFinished)
+    }
+
+    /// Quitting Burrow must not leave Mole waiting at a prompt (Mole traps TERM and HUP).
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["BURROW_SLOW_TESTS"] != nil))
+    func quittingStopsASessionAtAPrompt() async {
+        let s = MoleSession(title: "Preview", args: ["uninstall", "--dry-run", "Steam"])
+        s.start()
+        await waitUntil(s, seconds: 240) { if case .needsAnswer = $0.phase { return true }; return $0.isFinished }
+        Mole.terminateAll()
+        await waitUntil(s, seconds: 10) { $0.isFinished }
+        #expect(s.isFinished)
+    }
+}
+
+struct TrashPolicyTests {
+    let home = "/Users/me"
+
+    @Test func neverOnTheWholeMacTour() {
+        #expect(!TrashPolicy.allows("/Users/me/Downloads", inside: nil, home: home))
+        #expect(!TrashPolicy.allows("/Users/me/Library", inside: nil, home: home))
+    }
+
+    @Test func neverTopLevelOrSystemFolders() {
+        #expect(!TrashPolicy.allows("/Users/me/Downloads", inside: "/Users/me", home: home))
+        #expect(!TrashPolicy.allows("/Users/me/Projects", inside: "/Users/me", home: home))
+        #expect(!TrashPolicy.allows("/Users/me/Library/Caches", inside: "/Users/me/Library", home: home))
+        #expect(!TrashPolicy.allows("/Users/me/.ssh/id_ed25519", inside: "/Users/me/.ssh", home: home))
+        #expect(!TrashPolicy.allows("/Applications/Arc.app", inside: "/Applications", home: home))
+        // Two levels into ~/Library: personal data and sync roots stay off limits.
+        for (path, folder) in [("Keychains/login.keychain-db", "Keychains"),
+                               ("Mobile Documents/com~apple~CloudDocs", "Mobile Documents"),
+                               ("CloudStorage/GoogleDrive-me", "CloudStorage"), ("Mail/V10", "Mail"),
+                               ("Messages/chat.db", "Messages"), ("Containers/com.apple.mail", "Containers"),
+                               ("Group Containers/group.com.apple.notes", "Group Containers"),
+                               ("Accounts/Accounts4.sqlite", "Accounts"), ("Preferences/com.foo.plist", "Preferences")] {
+            #expect(!TrashPolicy.allows("/Users/me/Library/" + path, inside: "/Users/me/Library/" + folder, home: home), "\(path)")
+        }
+        #expect(!TrashPolicy.allows("/Users/me/Library/Application Support/MobileSync/Mail", inside: "/Users/me/Library/Application Support/MobileSync", home: home))
+        // Personal data and sync state in Application Support, and Apple's own folders there.
+        let support = "/Users/me/Library/Application Support"
+        for name in ["AddressBook", "FileProvider", "MobileSync", "CallHistoryDB", "Knowledge", "com.apple.sharedfilelist"] {
+            #expect(!TrashPolicy.allows(support + "/" + name, inside: support, home: home), "\(name)")
+        }
+        #expect(!TrashPolicy.allows(support + "/MobileSync/Backup", inside: support + "/MobileSync", home: home))
+    }
+
+    @Test func onlyDirectChildrenOfTheMappedFolder() {
+        #expect(TrashPolicy.allows("/Users/me/Downloads/big.dmg", inside: "/Users/me/Downloads", home: home))
+        #expect(TrashPolicy.allows("/Users/me/Library/Caches/com.foo", inside: "/Users/me/Library/Caches", home: home))
+        #expect(TrashPolicy.allows("/Users/me/Library/Application Support/OldApp", inside: "/Users/me/Library/Application Support", home: home))
+        #expect(TrashPolicy.allows("/Users/me/Library/Logs/OldApp", inside: "/Users/me/Library/Logs", home: home))
+        #expect(!TrashPolicy.allows("/Users/me/Downloads", inside: "/Users/me/Downloads", home: home))
+        #expect(!TrashPolicy.allows("/Users/me/Downloads/a/b", inside: "/Users/me/Downloads", home: home))
+        #expect(!TrashPolicy.allows("/Users/me/Downloads/../Documents/x", inside: "/Users/me/Downloads", home: home))
+    }
+}
+
+struct SettingsTests {
+    @Test func homeSpellings() {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        for entry in ["~", "~/", "$HOME", "${HOME}/", home, home + "/", home + "/."] {
+            #expect(ConfigList.isHome(entry), "\(entry)")
+        }
+        #expect(!ConfigList.isHome("~/PROJECTS"))
+    }
+
+    @Test func runningRunIsNotInterrupted() throws {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        let now = f.string(from: Date()), old = f.string(from: Date().addingTimeInterval(-7200))
+        let json = #"{"sessions":[{"command":"clean","started_at":"\#(now)","ended_at":""},{"command":"clean","started_at":"\#(old)","ended_at":""}]}"#
+        let s = try JSONDecoder().decode(HistoryResult.self, from: Data(json.utf8)).sessions ?? []
+        #expect(!s[0].looksInterrupted)
+        #expect(s[1].looksInterrupted)
     }
 }

@@ -50,6 +50,7 @@ struct GlowCard<Content: View>: View {
                                                  startPoint: .top, endPoint: .bottom), lineWidth: 1)
             }
             .shadow(color: style == .plain ? .clear : glow.color.opacity(0.22), radius: 28, y: 10)
+            .accessibilityElement(children: .contain)
             .reveal()
     }
 }
@@ -126,11 +127,27 @@ struct AmbientBackground: View {
         .drawingGroup()
         .ignoresSafeArea()
         .animation(.easeInOut(duration: 1.2), value: tint)
-        .onAppear { withAnimation(.easeInOut(duration: 18).repeatForever(autoreverses: true)) { drift = true } }
+        .onAppear {
+            guard !Motion.reduced else { return }
+            withAnimation(.easeInOut(duration: 18).repeatForever(autoreverses: true)) { drift = true }
+        }
     }
 }
 
 // MARK: - Buttons
+
+/// A capsule outline drawn as a circular rounded rectangle. Capsule().strokeBorder leaves short
+/// hairlines at both ends when the window is drawn offscreen (review snapshots); this does not.
+struct Pill: InsettableShape {
+    var inset: CGFloat = 0
+
+    func path(in rect: CGRect) -> Path {
+        let r = rect.insetBy(dx: inset, dy: inset)
+        return RoundedRectangle(cornerRadius: min(r.width, r.height) / 2, style: .circular).path(in: r)
+    }
+
+    func inset(by amount: CGFloat) -> Pill { Pill(inset: inset + amount) }
+}
 
 struct PillButtonStyle: ButtonStyle {
     enum Kind { case primary, secondary, danger }
@@ -164,8 +181,8 @@ private struct PillBody: View {
             .foregroundStyle(kind == .primary ? Color.black : Color.white)
             .background {
                 Capsule().fill(fill)
+                if kind == .secondary { Pill().strokeBorder(.white.opacity(0.14), lineWidth: 1) }
             }
-            .overlay { Capsule().strokeBorder(.white.opacity(kind == .secondary ? 0.14 : 0), lineWidth: 1) }
             .brightness(hover && enabled ? (kind == .primary ? -0.06 : 0.06) : 0)
             .opacity(!enabled ? 0.38 : configuration.isPressed ? 0.75 : 1)
             .scaleEffect(configuration.isPressed ? 0.96 : 1)
@@ -186,18 +203,52 @@ struct CircleIconButton: View {
     let symbol: String
     var help: String = ""
     let action: () -> Void
+    @Environment(\.isEnabled) private var enabled
+    @ViewState private var hover = false
 
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 14, weight: .medium))
                 .frame(width: 38, height: 38)
-                .background(Circle().fill(.white.opacity(0.08)))
+                .background(Circle().fill(.white.opacity(hover && enabled ? 0.14 : 0.08)))
                 .overlay(Circle().strokeBorder(.white.opacity(0.12)))
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(.white)
+        .opacity(enabled ? 1 : 0.4)
+        .onHover { hover = $0 }
+        .animation(Motion.quick, value: hover)
         .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
+/// A capsule segmented control in the app's style; the white pill slides to the choice.
+struct PillPicker<Value: Hashable>: View {
+    @Binding var selection: Value
+    let options: [(String, Value)]
+    @Namespace private var pill
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(options, id: \.1) { title, value in
+                let on = selection == value
+                Button { withAnimation(Motion.quick) { selection = value } } label: {
+                    Text(title).font(.system(size: 12.5, weight: on ? .semibold : .regular))
+                        .foregroundStyle(on ? Color.black : .white.opacity(0.75))
+                        .padding(.horizontal, 14).frame(height: 30)
+                        .background { if on { Capsule().fill(.white).matchedGeometryEffect(id: "pill", in: pill) } }
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+        }
+        .padding(4)
+        .background(Capsule().fill(.white.opacity(0.07)))
+        .overlay(Pill().strokeBorder(Theme.hairline))
     }
 }
 

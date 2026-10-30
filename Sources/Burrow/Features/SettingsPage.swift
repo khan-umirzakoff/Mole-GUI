@@ -7,6 +7,14 @@ struct ConfigList {
     static let whitelist = ConfigList(url: home(".config/mole/whitelist"))
     static let purgePaths = ConfigList(url: home(".config/mole/purge_paths"))
 
+    /// "~", "~/", "$HOME", "/Users/me/" and the like all name the home folder.
+    static func isHome(_ entry: String) -> Bool {
+        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+        let expanded = (entry.replacingOccurrences(of: "${HOME}", with: home).replacingOccurrences(of: "$HOME", with: home)
+                        as NSString).expandingTildeInPath
+        return URL(fileURLWithPath: expanded).standardizedFileURL.path == home
+    }
+
     static func home(_ path: String) -> URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(path)
     }
@@ -30,7 +38,8 @@ struct SettingsPage: View {
     @EnvironmentObject private var model: AppModel
     @ViewState private var whitelist: [String] = []
     @ViewState private var purgePaths: [String] = []
-    @ViewState private var touchID = "Checking…"
+    /// nil while checking.
+    @ViewState private var touchID: Bool?
     @ViewState private var confirm: ConfirmAction?
 
     var body: some View {
@@ -41,30 +50,40 @@ struct SettingsPage: View {
                              glow: .sage, entries: $whitelist) { ConfigList.whitelist.write($0) }
                 PathListCard(title: "Project scan folders",
                              caption: "Where Projects looks for build folders.",
+                             warning: purgePaths.contains(where: ConfigList.isHome)
+                                ? "Your whole home folder is slow to scan and can time out. Project folders work best." : "",
                              glow: .blue, entries: $purgePaths) { ConfigList.purgePaths.write($0) }
             }
+            // Cards in a row share the height of the taller one's content, never a fixed height.
+            .fixedSize(horizontal: false, vertical: true)
 
             HStack(alignment: .top, spacing: 18) {
                 GlowCard(glow: .violet, style: .core) {
                     VStack(alignment: .leading, spacing: 12) {
-                        Label("Touch ID for admin steps", systemImage: "touchid").cardTitle()
-                        Text("Approve Mole's administrator steps with your fingerprint instead of typing the password.").caption()
-                        Text(touchID).font(.system(size: 13, weight: .medium))
-                        Spacer(minLength: 0)
                         HStack {
-                            Button("Turn on") { model.run("Touch ID for sudo", ["touchid", "enable"]) { Task { await checkTouchID() } } }
-                                .buttonStyle(.pill)
-                            Button("Turn off") { model.run("Touch ID for sudo", ["touchid", "disable"]) { Task { await checkTouchID() } } }
-                                .buttonStyle(.pillSecondary)
+                            Label("Touch ID for admin steps", systemImage: "touchid").cardTitle()
+                            Spacer()
+                            switch touchID {
+                            case true?: Tag(text: "On", color: Theme.accent)
+                            case false?: Tag(text: "Off")
+                            case nil: PulseDot(color: .white)
+                            }
+                        }
+                        Text("Approve Mole's administrator steps with your fingerprint instead of typing the password. Changing it asks for your password once.").caption()
+                        Spacer(minLength: 0)
+                        if let on = touchID {
+                            Button(on ? "Turn off" : "Turn on") {
+                                model.run("Touch ID for sudo", ["touchid", on ? "disable" : "enable"]) { Task { await checkTouchID() } }
+                            }
+                            .buttonStyle(on ? .pillSecondary : .pill)
                         }
                     }
                 }
-                .frame(height: 210)
 
                 GlowCard(glow: .graphite, style: .plain) {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("About").cardTitle()
-                        Text("Burrow is a free, open-source window for Mole \(Mole.version), the macOS cleaner by tw93. Every change goes through Mole itself, with its safety checks and protection rules.").caption()
+                        Text("A free, open-source window for Mole \(Mole.version), the macOS cleaner by tw93. Clean, Uninstall, Optimize, Slim and removing all build folders run through Mole and its safety checks; installers, single build folders and Disk Map items you pick go to the Trash.").caption()
                         Text("Licensed GPL-3.0, like Mole.").caption()
                         Spacer(minLength: 0)
                         HStack {
@@ -77,20 +96,19 @@ struct SettingsPage: View {
                         }
                     }
                 }
-                .frame(height: 210)
             }
+            .fixedSize(horizontal: false, vertical: true)
 
             GlowCard(glow: .ember, style: .rim, padding: 22) {
                 HStack {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Remove Burrow completely").cardTitle()
-                        Text("Moves the app to the Trash and deletes everything it and Mole keep on this Mac: ~/.config/mole, ~/.cache/mole, ~/Library/Logs/mole and the app's preferences.").caption()
+                        Text("Moves the app, its preferences and the files Mole keeps (~/.config/mole, ~/.cache/mole, ~/Library/Logs/mole) to the Trash. If Mole is also installed on its own, its files stay.").caption()
                     }
                     Spacer()
                     Button("Remove…") { askToRemoveApp() }.buttonStyle(.pillDanger)
                 }
             }
-            .frame(height: 120)
         }
         .confirmation($confirm)
         .task {
@@ -101,32 +119,49 @@ struct SettingsPage: View {
     }
 
     private func checkTouchID() async {
+        touchID = nil
         let out = String(decoding: (try? await Mole.capture(["touchid", "status"])) ?? Data(), as: UTF8.self)
-        touchID = TerminalText.lines(out).last ?? "Unknown"
+        touchID = out.contains("is enabled")
     }
 
     private func askToRemoveApp() {
-        confirm = .init(title: "Remove Burrow and all its data?",
-                        message: "Mole's protection rules, scan folders, history and logs are deleted too. Files Mole already moved to the Trash stay there.",
+        let cli = Uninstaller.standaloneMole()
+        confirm = .init(title: "Remove Burrow?",
+                        message: cli.map { "Mole is also installed at \($0), so its protection rules, scan folders, history and logs stay. Burrow and its preferences go to the Trash." }
+                            ?? "Burrow, its preferences and Mole's protection rules, scan folders, history and logs go to the Trash. Files Mole already moved to the Trash stay there.",
                         button: "Remove") {
-            Uninstaller.removeEverything()
+            Uninstaller.removeEverything(keepMoleData: cli != nil)
         }
     }
 }
 
 enum Uninstaller {
-    /// Deletes Mole's state and the app's own preferences, then trashes the bundle and quits.
-    static func removeEverything() {
-        let fm = FileManager.default
-        for path in [".config/mole", ".cache/mole", "Library/Logs/mole",
-                     "Library/Saved Application State/\(Bundle.main.bundleIdentifier ?? "uz.khan.burrow").savedState"] {
-            try? fm.removeItem(at: ConfigList.home(path))
+    /// A Mole installed outside Burrow (Homebrew, the install script) shares ~/.config/mole.
+    static func standaloneMole() -> String? {
+        let path = ProcessInfo.processInfo.environment["PATH"] ?? ""
+        let dirs = path.split(separator: ":").map(String.init)
+            + ["/opt/homebrew/bin", "/usr/local/bin", ConfigList.home(".local/bin").path]
+        for dir in dirs {
+            for name in ["mo", "mole"] {
+                let candidate = (dir as NSString).appendingPathComponent(name)
+                if FileManager.default.isExecutableFile(atPath: candidate),
+                   !candidate.hasPrefix(Bundle.main.bundlePath) { return candidate }
+            }
         }
-        if let id = Bundle.main.bundleIdentifier {
-            UserDefaults.standard.removePersistentDomain(forName: id)
-            try? fm.removeItem(at: ConfigList.home("Library/Preferences/\(id).plist"))
-            try? fm.removeItem(at: ConfigList.home("Library/Caches/\(id)"))
-            try? fm.removeItem(at: ConfigList.home("Library/HTTPStorages/\(id)"))
+        return nil
+    }
+
+    /// Moves Burrow's (and, unless another Mole shares them, Mole's) files to the Trash, then
+    /// trashes the bundle and quits. The Trash keeps it all recoverable.
+    static func removeEverything(keepMoleData: Bool) {
+        let fm = FileManager.default
+        let id = Bundle.main.bundleIdentifier ?? "uz.khan.burrow"
+        var paths = ["Library/Saved Application State/\(id).savedState", "Library/Preferences/\(id).plist",
+                     "Library/Caches/\(id)", "Library/HTTPStorages/\(id)"]
+        if !keepMoleData { paths += [".config/mole", ".cache/mole", "Library/Logs/mole"] }
+        UserDefaults.standard.removePersistentDomain(forName: id)
+        for path in paths where fm.fileExists(atPath: ConfigList.home(path).path) {
+            try? fm.trashItem(at: ConfigList.home(path), resultingItemURL: nil)
         }
         if Bundle.main.bundleURL.pathExtension == "app" {
             try? fm.trashItem(at: Bundle.main.bundleURL, resultingItemURL: nil)
@@ -138,6 +173,7 @@ enum Uninstaller {
 private struct PathListCard: View {
     let title: String
     let caption: String
+    var warning = ""
     let glow: Glow
     @Binding var entries: [String]
     let save: ([String]) -> Void
@@ -148,21 +184,9 @@ private struct PathListCard: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text(title).cardTitle()
                 Text(caption).caption()
-                VStack(spacing: 6) {
-                    ForEach(entries, id: \.self) { entry in
-                        HStack {
-                            Text((entry as NSString).abbreviatingWithTildeInPath)
-                                .font(.system(size: 12, design: .monospaced)).lineLimit(1).truncationMode(.middle)
-                            Spacer()
-                            Button {
-                                entries.removeAll { $0 == entry }
-                                save(entries)
-                            } label: { Image(systemName: "minus.circle.fill") }
-                            .buttonStyle(.plain).foregroundStyle(Theme.secondaryText)
-                        }
-                        .padding(.horizontal, 12).frame(height: 30)
-                        .background(Capsule().fill(.white.opacity(0.05)))
-                    }
+                if !warning.isEmpty {
+                    Label(warning, systemImage: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11.5)).foregroundStyle(.orange)
                 }
                 HStack {
                     TextField("Add a path", text: $draft)
@@ -171,6 +195,32 @@ private struct PathListCard: View {
                         .onSubmit(add)
                     CircleIconButton(symbol: "folder.badge.plus", help: "Choose a folder") { choose() }
                 }
+                VStack(spacing: 6) {
+                    if entries.isEmpty {
+                        Text("None yet").font(.system(size: 12)).foregroundStyle(Theme.tertiaryText)
+                            .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 12).frame(height: 30)
+                    }
+                    ForEach(entries, id: \.self) { entry in
+                        HStack {
+                            Text((entry as NSString).abbreviatingWithTildeInPath)
+                                .font(.system(size: 12, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                            Spacer()
+                            Button {
+                                withAnimation(Motion.quick) { entries.removeAll { $0 == entry } }
+                                save(entries)
+                            } label: {
+                                Image(systemName: "minus.circle.fill").frame(width: 24, height: 24).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain).foregroundStyle(Theme.secondaryText)
+                            .help("Remove")
+                            .accessibilityLabel("Remove \(entry)")
+                        }
+                        .padding(.leading, 12).padding(.trailing, 4).frame(height: 30)
+                        .background(Capsule().fill(.white.opacity(0.05)))
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    }
+                }
+                Spacer(minLength: 0)
             }
         }
     }
@@ -178,7 +228,7 @@ private struct PathListCard: View {
     private func add() {
         let path = draft.trimmingCharacters(in: .whitespaces)
         guard !path.isEmpty, !entries.contains(path) else { return }
-        entries.append(path)
+        withAnimation(Motion.quick) { entries.append(path) }
         save(entries)
         draft = ""
     }

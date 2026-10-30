@@ -4,7 +4,8 @@ import Foundation
 
 struct ReportItem: Identifiable, Hashable {
     enum Kind { case action, info, skipped, ok }
-    let id = UUID()
+    /// Position in Mole's output, so a re-parse of a growing output keeps the same identity.
+    let id: String
     let kind: Kind
     let name: String
     let detail: String
@@ -12,7 +13,7 @@ struct ReportItem: Identifiable, Hashable {
 }
 
 struct ReportSection: Identifiable, Hashable {
-    let id = UUID()
+    let id: String
     let title: String
     var items: [ReportItem]
     var bytes: Int64 { items.filter { $0.kind == .action }.compactMap(\.bytes).reduce(0, +) }
@@ -24,17 +25,54 @@ struct SectionReport {
     var sections: [ReportSection] = []
     var summary: [String] = []
 
+    /// Sum of the rows. Rows overlap (a cache folder and a cache inside it), so this is only a
+    /// running figure while Mole scans; `total` is what a clean frees.
     var bytes: Int64 { sections.map(\.bytes).reduce(0, +) }
     var actionCount: Int { sections.flatMap(\.items).filter { $0.kind == .action }.count }
+
+    /// Mole's own "Potential space" (de-duplicated), "+" when some sizes were unknown.
+    var potential: Int64?
+    var potentialIsLowerBound = false
+    var itemCount: Int?
+    var categoryCount: Int?
+
+    /// What a clean frees: Mole's de-duplicated figure, else the row sum.
+    var total: Int64 { potential ?? bytes }
+
+    /// "622 items in 6 categories", from Mole's summary.
+    var tally: String? {
+        guard let items = itemCount else { return nil }
+        let first = "\(items.formatted()) item\(items == 1 ? "" : "s")"
+        guard let cats = categoryCount else { return first }
+        return first + " in \(cats.formatted()) categor\(cats == 1 ? "y" : "ies")"
+    }
 
     static func parse(_ output: String) -> SectionReport {
         var report = SectionReport()
         var inSummary = false
         for line in TerminalText.lines(output) {
             if line.hasPrefix("====") { inSummary.toggle(); continue }
-            if inSummary { report.summary.append(line); continue }
+            if inSummary {
+                report.summary.append(line)
+                // "Potential space: 11.27GB+ | Items: 622 | Categories: 6"
+                if line.hasPrefix("Potential space:") {
+                    for part in line.components(separatedBy: " | ") {
+                        let value = part.components(separatedBy: ": ").last ?? ""
+                        if part.hasPrefix("Potential space") {
+                            report.potential = ByteSize.first(in: value)
+                            report.potentialIsLowerBound = value.hasSuffix("+")
+                        } else if part.hasPrefix("Items") {
+                            report.itemCount = Int(value)
+                        } else if part.hasPrefix("Categories") {
+                            report.categoryCount = Int(value)
+                        }
+                    }
+                }
+                continue
+            }
             if line.hasPrefix("➤") {
-                report.sections.append(.init(title: String(line.dropFirst()).trimmingCharacters(in: .whitespaces), items: []))
+                let title = String(line.dropFirst()).trimmingCharacters(in: .whitespaces)
+                report.sections.append(.init(id: "\(report.sections.count)-\(title)", title: title, items: []))
                 continue
             }
             guard let icon = line.first else { continue }
@@ -48,7 +86,8 @@ struct SectionReport {
             }
             let body = String(line.dropFirst()).trimmingCharacters(in: .whitespaces)
             if report.sections.isEmpty {
-                if kind != .ok || !body.hasPrefix("Whitelist") { report.notes.append(body) }
+                // The dry-run banner and the whitelist count are Mole talking to the terminal.
+                if !body.hasPrefix("DRY RUN"), kind != .ok || !body.hasPrefix("Whitelist") { report.notes.append(body) }
                 continue
             }
             let parts = body.components(separatedBy: " · ")
@@ -64,8 +103,10 @@ struct SectionReport {
                 detail = ""
             }
             let bytes = detail.contains("protected") && detail.hasPrefix("0") ? nil : ByteSize.first(in: detail)
-            report.sections[report.sections.count - 1].items.append(
-                .init(kind: kind, name: name, detail: detail.replacingOccurrences(of: " dry", with: ""), bytes: bytes))
+            let last = report.sections.count - 1
+            report.sections[last].items.append(
+                .init(id: "\(last).\(report.sections[last].items.count)", kind: kind, name: name,
+                      detail: detail.replacingOccurrences(of: " dry", with: ""), bytes: bytes))
         }
         report.sections.removeAll { $0.items.isEmpty }
         return report
@@ -92,12 +133,34 @@ struct PurgeReport {
 
     var artifacts: [Artifact] = []
     var summary = ""
+    /// Mole's warnings, for example scan roots it had to skip.
+    var notes: [String] = []
+    /// Scan roots Mole could not finish ("~", "~/PROJECTS/Big"), listed under its warning.
+    var skippedRoots: [String] = []
     var bytes: Int64 { artifacts.map(\.bytes).reduce(0, +) }
+
+    private static let skippedRoot = try! NSRegularExpression(pattern: "^(.+) \\(status [0-9]+\\)$")
 
     static func parse(_ output: String) -> PurgeReport {
         var report = PurgeReport()
+        var inSkipped = false
         for line in TerminalText.lines(output) {
-            if let r = line.range(of: "[DRY RUN] ") {
+            if inSkipped {
+                let ns = NSRange(line.startIndex..., in: line)
+                if let m = skippedRoot.firstMatch(in: line, range: ns), let r = Range(m.range(at: 1), in: line) {
+                    report.skippedRoots.append(String(line[r]))
+                    continue
+                }
+                if line.hasPrefix("and "), line.hasSuffix(" more") { continue }
+                inSkipped = false
+            }
+            if line.hasPrefix("◎ Skipped") {
+                // The heading ends with a colon; the roots follow on their own lines.
+                var note = String(line.dropFirst()).trimmingCharacters(in: .whitespaces)
+                if note.hasSuffix(":") { note.removeLast() }
+                report.notes.append(note)
+                inSkipped = true
+            } else if let r = line.range(of: "[DRY RUN] ") {
                 let rest = line[r.upperBound...]
                 guard let comma = rest.range(of: ", ", options: .backwards) else { continue }
                 report.artifacts.append(.init(path: String(rest[..<comma.lowerBound]),
@@ -107,6 +170,9 @@ struct PurgeReport {
             }
         }
         report.artifacts.sort { $0.bytes > $1.bytes }
+        if !report.skippedRoots.isEmpty, let i = report.notes.firstIndex(where: { $0.hasPrefix("Skipped") }) {
+            report.notes[i] += ": " + report.skippedRoots.joined(separator: ", ")
+        }
         return report
     }
 }
@@ -177,11 +243,18 @@ struct AnalyzeResult: Decodable {
         let size: Int64
         let is_dir: Bool?
         let last_access: String?
-        var id: String { path }
+        /// Whole-Mac overview only: a summary such as "Old Downloads (90d+)", whose `path` is the
+        /// folder it was found in and whose `size` is only the part it describes.
+        let insight: Bool?
+        let cleanable: Bool?
+        var id: String { path + name }
         var isDirectory: Bool { is_dir ?? false }
+        var isInsight: Bool { insight ?? false }
     }
 
     let path: String?
+    /// True for the whole-Mac tour: its entries overlap (Home contains User Library) and do not add up.
+    let overview: Bool?
     let scan_status: String?
     let entries: [Entry]?
     let large_files: [Entry]?
@@ -218,5 +291,8 @@ struct InstalledApp: Decodable, Identifiable, Hashable {
     let source: String?
     let uninstall_name: String
     let path: String
+    /// Mole's own measurement ("1.2GB"), cached by Mole between runs.
+    let size: String?
     var id: String { path }
+    var bytes: Int64? { size.flatMap { ByteSize.first(in: $0) } }
 }

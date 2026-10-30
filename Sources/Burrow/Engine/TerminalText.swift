@@ -22,7 +22,8 @@ enum TerminalText {
 
     /// Splits a block of output (for example a whole dry run) into visible, non-empty lines.
     static func lines(_ output: String) -> [String] {
-        output.split(separator: "\n", omittingEmptySubsequences: false)
+        // "\r\n" is a single Character in Swift, so it never equals "\n"; normalise it first.
+        output.replacingOccurrences(of: "\r\n", with: "\n").split(separator: "\n", omittingEmptySubsequences: false)
             .map { visible(String($0)) }
             .filter { !$0.isEmpty }
     }
@@ -40,7 +41,9 @@ enum ByteSize {
         return Int64(value * mult)
     }
 
+    /// "1.3 GB"; zero stays a number ("0 KB") so the dotted numerals can draw it. Always a decimal
+    /// point, whatever the locale: it matches Mole's figures, and a dotted "11,27" reads like a clock.
     static func format(_ bytes: Int64) -> String {
-        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .decimal)
+        bytes.formatted(.byteCount(style: .decimal, spellsOutZero: false).locale(Locale(identifier: "en_US_POSIX")))
     }
 }

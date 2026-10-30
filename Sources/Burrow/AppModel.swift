@@ -70,20 +70,43 @@ enum Page: String, CaseIterable, Identifiable {
 /// Shared state: navigation, the running Mole session and the last scan of each tool.
 @MainActor
 final class AppModel: ObservableObject {
-    @Published var page: Page = .overview
+    /// `-startPage clean` on the command line opens a page directly (handy for screenshots).
+    @Published var page = Page(rawValue: UserDefaults.standard.string(forKey: "startPage") ?? "") ?? .overview
     @Published var session: MoleSession?
+    /// Pages with work in progress, marked in the sidebar.
+    @Published private(set) var busy = Set<Page>()
 
     let clean = Scan(["clean", "--dry-run"], parse: SectionReport.parse)
     let optimize = Scan(["optimize", "--dry-run"], parse: SectionReport.parse)
-    let purge = Scan(["purge", "--dry-run"], parse: PurgeReport.parse)
+    /// Mole rewrites this file with the folder it is scanning; Burrow only reads it.
+    let purge = Scan(["purge", "--dry-run"],
+                     progressFile: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".cache/mole/purge_scanning"),
+                     parse: PurgeReport.parse)
     let slim = Scan(["slim", "--dry-run"], parse: SlimReport.parse)
     let apps = AppCatalog()
     let diskMap = DiskMap()
     let installers = InstallerStore()
 
+    init() {
+        clean.onBusyChange = { [weak self] in self?.mark(.clean, $0) }
+        optimize.onBusyChange = { [weak self] in self?.mark(.optimize, $0) }
+        purge.onBusyChange = { [weak self] in self?.mark(.projects, $0) }
+        slim.onBusyChange = { [weak self] in self?.mark(.slim, $0) }
+        installers.onBusyChange = { [weak self] in self?.mark(.installers, $0) }
+        diskMap.onBusyChange = { [weak self] in self?.mark(.analyze, $0) }
+        // Finding old installers is a quick native walk of a few folders, so the overview can
+        // show a real number at once. Mole's heavy dry runs wait until the user asks.
+        Task { await installers.load() }
+    }
+
+    private func mark(_ page: Page, _ on: Bool) {
+        if on { busy.insert(page) } else { busy.remove(page) }
+    }
+
     /// Starts a Mole command in the run sheet. `onFinish` runs after the user closes the sheet.
     func run(_ title: String, _ args: [String], responders: [MoleSession.Responder] = [],
              onFinish: (() -> Void)? = nil) {
+        guard session == nil else { return }
         let s = MoleSession(title: title, args: args, responders: responders)
         finishHandler = onFinish
         session = s
@@ -92,10 +115,13 @@ final class AppModel: ObservableObject {
 
     private var finishHandler: (() -> Void)?
 
-    func closeSession() {
-        session?.cancel()
-        session = nil
-        finishHandler?()
+    /// Closes the run sheet; `sessionDismissed` follows once it is gone.
+    func closeSession() { session = nil }
+
+    /// Runs once the sheet is gone, however it was closed.
+    func sessionDismissed() {
+        let handler = finishHandler
         finishHandler = nil
+        handler?()
     }
 }

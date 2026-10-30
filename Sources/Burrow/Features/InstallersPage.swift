@@ -52,12 +52,15 @@ enum InstallerScanner {
 final class InstallerStore: ObservableObject {
     @Published var files: [InstallerFile]?
     @Published var scanning = false
+    var onBusyChange: ((Bool) -> Void)?
 
     func load() async {
         guard !scanning else { return }
         scanning = true
+        onBusyChange?(true)
         files = await Task.detached { InstallerScanner.scan() }.value
         scanning = false
+        onBusyChange?(false)
     }
 }
 
@@ -65,77 +68,69 @@ struct InstallersPage: View {
     @ObservedObject var store: InstallerStore
     @ViewState private var selected = Set<String>()
     @ViewState private var confirm: ConfirmAction?
+    @ViewState private var failed: [String] = []
 
+    private var files: [InstallerFile]? { store.files }
     private var total: Int64 { (files ?? []).map(\.bytes).reduce(0, +) }
     private var selectedBytes: Int64 { (files ?? []).filter { selected.contains($0.path) }.map(\.bytes).reduce(0, +) }
+    private var allSelected: Bool { !selected.isEmpty && selected.count == (files?.count ?? 0) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             HeroCard(glow: .ember, label: "Installer files", bytes: files.map { _ in total },
-                     detail: "\(files?.count ?? 0) disk images and packages in Downloads, Desktop, Mail and Telegram.",
-                     scanning: store.scanning) {
-                Button("Rescan") { Task { await load() } }.buttonStyle(.pillSecondary)
-                Button(selected.count == (files?.count ?? 0) && !selected.isEmpty ? "Select none" : "Select all") {
-                    selected = selected.count == files?.count ? [] : Set((files ?? []).map(\.path))
+                     detail: files.map { "\($0.count) disk image\($0.count == 1 ? "" : "s") and packages in Downloads, Desktop, Mail and Telegram." }
+                        ?? "Looks in Downloads, Desktop, Documents, Mail and Telegram.",
+                     scanning: store.scanning, progress: "Looking in Downloads, Desktop, Mail and Telegram") {
+                Button("Rescan") { Task { await load() } }.buttonStyle(.pillSecondary).disabled(store.scanning)
+                    .keyboardShortcut("r", modifiers: .command)
+                Button(allSelected ? "Select none" : "Select all") {
+                    selected = allSelected ? [] : Set((files ?? []).map(\.path))
                 }
                 .buttonStyle(.pillSecondary)
+                .disabled((files ?? []).isEmpty)
+            }
+
+            if !failed.isEmpty {
+                Label("\(failed.count) file\(failed.count == 1 ? "" : "s") could not be moved to the Trash: "
+                      + failed.map { ($0 as NSString).lastPathComponent }.prefix(3).joined(separator: ", "),
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 12.5)).foregroundStyle(Theme.danger)
             }
 
             if let files, files.isEmpty {
-                EmptyState(symbol: "opticaldiscdrive", text: "No installer files left behind.")
+                EmptyState(symbol: "checkmark.seal", text: "No installer files left behind.")
             }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 14)], spacing: 14) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 360), spacing: 14)], spacing: 14) {
                 ForEach(files ?? []) { file in
-                    Button { toggle(file) } label: {
-                        HStack(spacing: 12) {
-                            AppIcon(path: file.path, size: 38)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(file.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
-                                Text("\(file.folder) · \(file.modified.formatted(.relative(presentation: .named)))").caption().lineLimit(1)
-                            }
-                            Spacer(minLength: 0)
-                            Text(file.bytes.bytesText).font(.system(size: 12, design: .monospaced))
-                            CheckDot(on: selected.contains(file.path))
+                    SelectTile(selected: selected.contains(file.path), glow: .ember) { toggle(file) } content: {
+                        AppIcon(path: file.path, size: 38)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(file.name).font(.system(size: 13, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                            Text("\(file.folder) · \(file.modified.formatted(.relative(presentation: .named)))").caption().lineLimit(1)
                         }
-                        .padding(12)
-                        .background(RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .fill(selected.contains(file.path) ? Glow.ember.color.opacity(0.2) : .white.opacity(0.045)))
-                        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .strokeBorder(selected.contains(file.path) ? Glow.ember.color.opacity(0.7) : Theme.hairline))
-                        .contentShape(RoundedRectangle(cornerRadius: 20))
+                        Spacer(minLength: 8)
+                        Text(file.bytes.bytesText).font(.system(size: 12)).monospacedDigit()
+                            .frame(width: 78, alignment: .trailing)
                     }
-                    .buttonStyle(.plain)
-                    .hoverLift(1.02)
                     .contextMenu {
                         Button("Show in Finder") { NSWorkspace.shared.selectFile(file.path, inFileViewerRootedAtPath: "") }
                     }
                 }
             }
         }
-        .padding(.bottom, selected.isEmpty ? 0 : 90)
-        .overlay(alignment: .bottom) {
-            if !selected.isEmpty {
-                GlowCard(glow: .ember, style: .core, padding: 16) {
-                    HStack {
-                        Text("\(selected.count) files · \(selectedBytes.bytesText)").font(.system(size: 14, weight: .semibold))
-                        Spacer()
-                        Button("Move to Trash") { askToTrash() }.buttonStyle(.pill)
-                    }
-                }
-                .frame(height: 70)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+        .bottomBar(!selected.isEmpty) {
+            SelectionBar(glow: .ember, title: "\(selected.count) file\(selected.count == 1 ? "" : "s") · \(selectedBytes.bytesText)",
+                         subtitle: "They go to the Trash, so you can put them back.", clear: { selected.removeAll() }) {
+                Button("Move to Trash") { askToTrash() }.buttonStyle(.pill)
             }
         }
-        .animation(.snappy, value: selected.isEmpty)
         .confirmation($confirm)
-        .task { if files == nil { await load() } }
+        .onAppear { if store.files == nil { Task { await load() } } }
     }
 
     private func toggle(_ file: InstallerFile) {
         if selected.contains(file.path) { selected.remove(file.path) } else { selected.insert(file.path) }
     }
-
-    private var files: [InstallerFile]? { store.files }
 
     private func load() async {
         await store.load()
@@ -143,10 +138,10 @@ struct InstallersPage: View {
     }
 
     private func askToTrash() {
-        confirm = .init(title: "Move \(selected.count) installers to the Trash?",
+        confirm = .init(title: "Move \(selected.count) installer\(selected.count == 1 ? "" : "s") to the Trash?",
                         message: "\(selectedBytes.bytesText). You can restore them from the Trash.",
                         button: "Move to Trash") {
-            for path in selected { try? FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil) }
+            failed = Trash.move(Array(selected))
             selected.removeAll()
             Task { await load() }
         }

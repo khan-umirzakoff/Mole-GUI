@@ -22,7 +22,8 @@ struct ArcTicks: View {
                 }
             }
         }
-        .animation(.smooth(duration: 0.6), value: value)
+        .animation(Motion.reduced ? nil : .smooth(duration: 0.6), value: value)
+        .accessibilityHidden(true)
     }
 }
 
@@ -40,40 +41,75 @@ struct DotMeter: View {
                     .frame(width: 4, height: 4)
             }
         }
-        .animation(.smooth(duration: 0.5), value: value)
+        .animation(Motion.reduced ? nil : .smooth(duration: 0.5), value: value)
+        .accessibilityHidden(true)
     }
 }
 
-/// Thin vertical bars for short histories (network, per-core load).
+/// Thin vertical bars for short histories (network, per-core load). Bars stay slim however
+/// few values there are, so a handful of cores never turns into fat blobs.
 struct BarSpark: View {
     let values: [Double]
     var color: Color = .white
     var maxValue: Double? = nil
+    var maxBarWidth: CGFloat = 6
 
     var body: some View {
         GeometryReader { geo in
             let top = max(maxValue ?? values.max() ?? 1, 0.0001)
-            HStack(alignment: .bottom, spacing: 3) {
+            let n = CGFloat(max(values.count, 1))
+            let width = min(maxBarWidth, max(2, (geo.size.width - 3 * (n - 1)) / n))
+            HStack(alignment: .bottom, spacing: max(3, (geo.size.width - width * n) / max(n - 1, 1))) {
                 ForEach(Array(values.enumerated()), id: \.offset) { _, v in
                     Capsule()
                         .fill(color.opacity(0.35 + 0.65 * min(v / top, 1)))
-                        .frame(height: max(3, geo.size.height * min(v / top, 1)))
+                        .frame(width: width, height: max(3, geo.size.height * min(v / top, 1)))
                 }
             }
-            .frame(maxHeight: .infinity, alignment: .bottom)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         }
-        .animation(.smooth(duration: 0.4), value: values)
+        .animation(Motion.reduced ? nil : .smooth(duration: 0.4), value: values)
+        .accessibilityHidden(true)
     }
 }
 
-/// An app's icon from its bundle path.
+/// An app's icon from its bundle path. Icons are cached: grids redraw on every hover.
 struct AppIcon: View {
     let path: String
     var size: CGFloat = 36
 
+    nonisolated(unsafe) private static let cache = NSCache<NSString, NSImage>()
+
     var body: some View {
-        Image(nsImage: NSWorkspace.shared.icon(forFile: path))
+        Image(nsImage: Self.icon(path))
             .resizable()
+            .interpolation(.high)
             .frame(width: size, height: size)
+            .accessibilityHidden(true)
+    }
+
+    private static func icon(_ path: String) -> NSImage {
+        if let hit = cache.object(forKey: path as NSString) { return hit }
+        let image = NSWorkspace.shared.icon(forFile: path)
+        cache.setObject(image, forKey: path as NSString)
+        return image
+    }
+}
+
+/// A small breathing dot that marks work in progress (sidebar, scanning badges).
+struct PulseDot: View {
+    var color: Color = Theme.accent
+    @ViewState private var on = false
+
+    var body: some View {
+        Circle().fill(color)
+            .frame(width: 7, height: 7)
+            .overlay(Circle().stroke(color.opacity(on ? 0 : 0.6), lineWidth: 1).scaleEffect(on ? 2.4 : 1))
+            .opacity(on ? 1 : 0.55)
+            .onAppear {
+                guard !Motion.reduced else { on = true; return }
+                withAnimation(.easeOut(duration: 1.1).repeatForever(autoreverses: false)) { on = true }
+            }
+            .accessibilityHidden(true)
     }
 }
