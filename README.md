@@ -6,6 +6,10 @@ remove project build folders and old installers, slim universal apps, and watch 
 
 ![Overview](docs/overview.jpg)
 
+**Demo (41 s):** every page and the moves between them.
+
+[![Burrow demo video](docs/demo-poster.jpg)](docs/demo.mp4)
+
 ## Why
 
 Mole is excellent but lives in the terminal, and its own app is paid. Burrow puts a native

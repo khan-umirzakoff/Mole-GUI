@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// `-tour <folder>`: walks through every page the way a person would and saves the window about
-/// 30 times a second (JPEG frames plus an ffmpeg concat list with real timings), then quits.
-/// `scripts/demo-video.sh` turns the frames into the README video. It only navigates: it never
-/// starts a Mole action or a scan.
+/// `-tour <folder>`: walks through every page the way a person would, then quits. The window is
+/// placed at a fixed size and its screen rectangle (top-left origin, points) is written to
+/// `<folder>/rect` so `scripts/demo-video.sh` can screen-record exactly it; the steps start a
+/// moment later. It only navigates: it never starts a Mole action or a scan.
 @MainActor
 enum Tour {
     private static let steps: [(seconds: Double, step: @MainActor (AppModel) -> Void)] = [
@@ -23,40 +23,22 @@ enum Tour {
     ]
 
     static func start(_ model: AppModel, into folder: String) {
-        let dir = URL(fileURLWithPath: folder)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let writes = DispatchGroup()
-        var times: [Date] = []
-        let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { _ in
-            MainActor.assumeIsolated {
-                guard let view = NSApp.windows.first(where: \.isVisible)?.contentView,
-                      let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
-                view.cacheDisplay(in: view.bounds, to: rep)
-                let url = dir.appendingPathComponent(String(format: "f%05d.jpg", times.count))
-                times.append(Date())
-                nonisolated(unsafe) let frame = rep
-                DispatchQueue.global(qos: .userInitiated).async(group: writes) {
-                    try? frame.representation(using: .jpeg, properties: [.compressionFactor: 0.95])?.write(to: url)
-                }
-            }
-        }
-        RunLoop.main.add(timer, forMode: .common)
+        guard let window = NSApp.windows.first(where: \.isVisible), let screen = NSScreen.screens.first else { return }
+        window.setContentSize(NSSize(width: 1280, height: 800))
+        window.center()
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        let f = window.frame
+        let rect = "\(Int(f.minX)),\(Int(screen.frame.maxY - f.maxY)),\(Int(f.width)),\(Int(f.height))"
+        try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        try? rect.write(toFile: (folder as NSString).appendingPathComponent("rect"), atomically: true, encoding: .utf8)
 
-        var at = 0.8
+        // The recorder starts once it reads the rectangle.
+        var at = 2.0
         for (seconds, step) in steps {
             DispatchQueue.main.asyncAfter(deadline: .now() + at) { MainActor.assumeIsolated { step(model) } }
             at += seconds
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + at) {
-            timer.invalidate()
-            // Each frame lasts until the next one was taken, so the video keeps the real pace.
-            var list = "ffconcat version 1.0\n"
-            for i in times.indices {
-                let next = i + 1 < times.count ? times[i + 1] : times[i].addingTimeInterval(1.0 / 30)
-                list += String(format: "file f%05d.jpg\nduration %.4f\n", i, next.timeIntervalSince(times[i]))
-            }
-            try? list.write(to: dir.appendingPathComponent("frames.ffconcat"), atomically: true, encoding: .utf8)
-            writes.notify(queue: .main) { NSApp.terminate(nil) }
-        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + at) { NSApp.terminate(nil) }
     }
 }

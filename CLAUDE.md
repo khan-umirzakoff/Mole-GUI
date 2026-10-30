@@ -48,6 +48,8 @@ engine/backend code.
 GitHub releases carry `Burrow.dmg` (`scripts/dmg.sh`) and `Burrow.zip`
 (`ditto -c -k --keepParent build/Burrow.app`). Bump `VERSION`, build, test, then
 `gh release create v<version>`.
+`scripts/demo-video.sh` re-records `docs/demo.mp4` (the `-tour` walk, screen-recorded with
+`screencapture -v`; `cacheDisplay` misses SwiftUI transitions). The window must stay uncovered ~45 s.
 
 ## Performance
 Nothing may animate forever behind the content: a repeating animation inside a large layer makes
