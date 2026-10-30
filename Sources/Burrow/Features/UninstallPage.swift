@@ -186,7 +186,7 @@ struct SearchField: View {
         .padding(.horizontal, 14)
         .frame(height: 38)
         .background(Capsule().fill(.white.opacity(0.07)))
-        .overlay(Capsule().strokeBorder(focused.wrappedValue ? .white.opacity(0.3) : Theme.hairline))
+        .overlay(Pill().strokeBorder(focused.wrappedValue ? .white.opacity(0.3) : Theme.hairline))
         .help("Search (⌘F)")
     }
 }

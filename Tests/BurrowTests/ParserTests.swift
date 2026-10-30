@@ -30,6 +30,9 @@ struct ParserTests {
         #expect(r.bytes == 1_300_000_000) // manual items are not counted
         #expect(r.notes.count == 1)
         #expect(r.summary.count == 2)
+        #expect(r.potential == 10_630_000_000 && r.potentialIsLowerBound)
+        #expect(r.total == 10_630_000_000)
+        #expect(r.itemCount == 524 && r.categoryCount == 6)
     }
 
     @Test func purgeAndSlim() {
@@ -80,11 +83,13 @@ struct BehaviourTests {
     @Test func scanStatusLine() {
         #expect(Scan<SectionReport>.describe("→ User app cache · 38 items, 1.41GB dry") == "User app cache")
         #expect(Scan<SectionReport>.describe("→ Arc Service Worker, would clean 40.1MB, 0 protected") == "Arc Service Worker")
+        #expect(Scan<PurgeReport>.describe("✓ [DRY RUN] ~/P/a/.expo, 4KB") == "~/P/a/.expo")
     }
 
     @Test func purgeNotes() {
         let r = PurgeReport.parse("◎ Skipped 1 project scan root because scanning did not complete:\n  ~/P (status 124)\n✓ [DRY RUN] ~/P/a/node_modules, 1GB")
-        #expect(r.notes.count == 1)
+        #expect(r.notes == ["Skipped 1 project scan root because scanning did not complete: ~/P"])
+        #expect(r.skippedRoots == ["~/P"])
         #expect(r.artifacts.count == 1)
     }
 
@@ -196,11 +201,23 @@ struct TrashPolicyTests {
         #expect(!TrashPolicy.allows("/Users/me/Library/Caches", inside: "/Users/me/Library", home: home))
         #expect(!TrashPolicy.allows("/Users/me/.ssh/id_ed25519", inside: "/Users/me/.ssh", home: home))
         #expect(!TrashPolicy.allows("/Applications/Arc.app", inside: "/Applications", home: home))
+        // Two levels into ~/Library: personal data and sync roots stay off limits.
+        for (path, folder) in [("Keychains/login.keychain-db", "Keychains"),
+                               ("Mobile Documents/com~apple~CloudDocs", "Mobile Documents"),
+                               ("CloudStorage/GoogleDrive-me", "CloudStorage"), ("Mail/V10", "Mail"),
+                               ("Messages/chat.db", "Messages"), ("Containers/com.apple.mail", "Containers"),
+                               ("Group Containers/group.com.apple.notes", "Group Containers"),
+                               ("Accounts/Accounts4.sqlite", "Accounts"), ("Preferences/com.foo.plist", "Preferences")] {
+            #expect(!TrashPolicy.allows("/Users/me/Library/" + path, inside: "/Users/me/Library/" + folder, home: home), "\(path)")
+        }
+        #expect(!TrashPolicy.allows("/Users/me/Library/Application Support/MobileSync/Mail", inside: "/Users/me/Library/Application Support/MobileSync", home: home))
     }
 
     @Test func onlyDirectChildrenOfTheMappedFolder() {
         #expect(TrashPolicy.allows("/Users/me/Downloads/big.dmg", inside: "/Users/me/Downloads", home: home))
         #expect(TrashPolicy.allows("/Users/me/Library/Caches/com.foo", inside: "/Users/me/Library/Caches", home: home))
+        #expect(TrashPolicy.allows("/Users/me/Library/Application Support/OldApp", inside: "/Users/me/Library/Application Support", home: home))
+        #expect(TrashPolicy.allows("/Users/me/Library/Logs/OldApp", inside: "/Users/me/Library/Logs", home: home))
         #expect(!TrashPolicy.allows("/Users/me/Downloads", inside: "/Users/me/Downloads", home: home))
         #expect(!TrashPolicy.allows("/Users/me/Downloads/a/b", inside: "/Users/me/Downloads", home: home))
         #expect(!TrashPolicy.allows("/Users/me/Downloads/../Documents/x", inside: "/Users/me/Downloads", home: home))

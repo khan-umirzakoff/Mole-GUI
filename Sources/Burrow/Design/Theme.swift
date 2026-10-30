@@ -136,6 +136,19 @@ struct AmbientBackground: View {
 
 // MARK: - Buttons
 
+/// A capsule outline drawn as a circular rounded rectangle. Capsule().strokeBorder leaves short
+/// hairlines at both ends when the window is drawn offscreen (review snapshots); this does not.
+struct Pill: InsettableShape {
+    var inset: CGFloat = 0
+
+    func path(in rect: CGRect) -> Path {
+        let r = rect.insetBy(dx: inset, dy: inset)
+        return RoundedRectangle(cornerRadius: min(r.width, r.height) / 2, style: .circular).path(in: r)
+    }
+
+    func inset(by amount: CGFloat) -> Pill { Pill(inset: inset + amount) }
+}
+
 struct PillButtonStyle: ButtonStyle {
     enum Kind { case primary, secondary, danger }
     var kind: Kind = .primary
@@ -168,8 +181,8 @@ private struct PillBody: View {
             .foregroundStyle(kind == .primary ? Color.black : Color.white)
             .background {
                 Capsule().fill(fill)
+                if kind == .secondary { Pill().strokeBorder(.white.opacity(0.14), lineWidth: 1) }
             }
-            .overlay { Capsule().strokeBorder(.white.opacity(kind == .secondary ? 0.14 : 0), lineWidth: 1) }
             .brightness(hover && enabled ? (kind == .primary ? -0.06 : 0.06) : 0)
             .opacity(!enabled ? 0.38 : configuration.isPressed ? 0.75 : 1)
             .scaleEffect(configuration.isPressed ? 0.96 : 1)
@@ -235,7 +248,7 @@ struct PillPicker<Value: Hashable>: View {
         }
         .padding(4)
         .background(Capsule().fill(.white.opacity(0.07)))
-        .overlay(Capsule().strokeBorder(Theme.hairline))
+        .overlay(Pill().strokeBorder(Theme.hairline))
     }
 }
 

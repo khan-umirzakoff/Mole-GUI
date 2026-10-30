@@ -74,7 +74,12 @@ final class MoleSession: ObservableObject, Identifiable {
             // Child: only async-signal-safe calls until exec. Ignored signals and the signal mask
             // survive exec, and bash cannot trap a signal that was ignored when it started, so
             // Mole gets clean defaults: Stop (SIGINT) then runs Mole's own cleanup traps.
-            for sig in [SIGINT, SIGTERM, SIGHUP, SIGQUIT, SIGPIPE] { _ = signal(sig, SIG_DFL) }
+            // Written out one by one: no allocation between fork and exec.
+            _ = signal(SIGINT, SIG_DFL)
+            _ = signal(SIGTERM, SIG_DFL)
+            _ = signal(SIGHUP, SIG_DFL)
+            _ = signal(SIGQUIT, SIG_DFL)
+            _ = signal(SIGPIPE, SIG_DFL)
             _ = sigprocmask(SIG_SETMASK, &unblocked, nil)
             _ = chdir(home)
             execve(exe, argv, envp)

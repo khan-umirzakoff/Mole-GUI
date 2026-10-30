@@ -105,11 +105,15 @@ final class DiskMap: ObservableObject {
 /// Which Disk Map items may be moved to the Trash. Only a real item directly inside the folder
 /// being mapped, inside the home folder, and never one of the folders macOS and apps rely on.
 enum TrashPolicy {
-    /// Folders whose direct children belong to macOS and apps (caches, settings, keys): only items
-    /// at least one level further down may go.
-    static let systemish: Set<String> = ["Library", ".config", ".local", ".cache"]
-    /// Never touched at any depth.
-    static let never: Set<String> = [".ssh", ".gnupg", ".Trash"]
+    /// Inside ~/Library only these hold disposable things (caches, logs, app data the user may
+    /// prune); everything else there (Keychains, Mail, Messages, Containers, iCloud Drive,
+    /// CloudStorage, Accounts…) is never offered.
+    static let libraryAllowed: Set<String> = ["Caches", "Logs", "Application Support"]
+    /// Folders whose direct children belong to tools and apps: only one level further down.
+    static let toolFolders: Set<String> = [".config", ".local", ".cache"]
+    /// Never touched at any depth, wherever they appear.
+    static let never: Set<String> = [".ssh", ".gnupg", ".Trash", "Keychains", "Mobile Documents", "CloudStorage",
+                                     "Mail", "Messages", "Containers", "Group Containers", "Accounts"]
 
     static func allows(_ path: String, inside current: String?, home: String) -> Bool {
         guard let current else { return false } // the whole-Mac tour lists summaries, not items
@@ -121,8 +125,9 @@ enum TrashPolicy {
               item.path.hasPrefix(homeURL.path + "/") else { return false }
         let inHome = Array(item.pathComponents.dropFirst(homeURL.pathComponents.count))
         // Top-level home folders (Documents, Downloads, Projects…) hold everything else.
-        guard inHome.count >= 2, !never.contains(inHome[0]) else { return false }
-        return !systemish.contains(inHome[0]) || inHome.count >= 3
+        guard inHome.count >= 2, inHome.allSatisfy({ !never.contains($0) }) else { return false }
+        if inHome[0] == "Library" { return libraryAllowed.contains(inHome[1]) && inHome.count >= 3 }
+        return !toolFolders.contains(inHome[0]) || inHome.count >= 3
     }
 }
 
@@ -138,10 +143,11 @@ struct AnalyzePage: View {
     @ObservedObject var map: DiskMap
     @ViewState private var confirm: ConfirmAction?
     @ViewState private var hovered: String?
+    @ViewState private var trashError: String?
 
     private let places: [(String, String?)] = [
         ("Whole Mac", nil), ("Home", "~"), ("Downloads", "~/Downloads"), ("Documents", "~/Documents"),
-        ("Library", "~/Library"), ("Applications", "/Applications"), ("External drives", "/Volumes"),
+        ("Library", "~/Library"), ("Applications", "/Applications"), ("Drives", "/Volumes"),
     ]
 
     private var entries: [AnalyzeResult.Entry] {
@@ -165,28 +171,43 @@ struct AnalyzePage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            ScrollView(.horizontal) {
-                HStack(spacing: 8) {
-                    ForEach(places, id: \.0) { place in
-                        let path = place.1.map { ($0 as NSString).expandingTildeInPath }
-                        let active = map.trail.first == path || (path == nil && map.trail.isEmpty)
-                        Button(place.0) { map.jump(to: path) }
-                            .buttonStyle(active ? .pill : .pillSecondary)
-                            .accessibilityAddTraits(active ? .isSelected : [])
+            HStack(spacing: 10) {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(places, id: \.0) { place in
+                            let path = place.1.map { ($0 as NSString).expandingTildeInPath }
+                            let active = map.trail.first == path || (path == nil && map.trail.isEmpty)
+                            Button(place.0) { map.jump(to: path) }
+                                .buttonStyle(active ? .pill : .pillSecondary)
+                                .accessibilityAddTraits(active ? .isSelected : [])
+                        }
                     }
-                    Button { choose() } label: { Label("Choose…", systemImage: "folder") }.buttonStyle(.pillSecondary)
+                    .padding(.horizontal, 2)
                 }
+                .scrollIndicators(.never)
+                // A soft trailing edge shows there is more to scroll when the window is narrow.
+                .mask(LinearGradient(stops: [.init(color: .black, location: 0),
+                                             .init(color: .black, location: 0.94), .init(color: .clear, location: 1)],
+                                     startPoint: .leading, endPoint: .trailing))
+                CircleIconButton(symbol: "folder", help: "Map another folder…") { choose() }
             }
-            .scrollIndicators(.never)
 
             breadcrumb
+
+            if let trashError {
+                Label(trashError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 12.5)).foregroundStyle(Theme.danger)
+                    .transition(.blurFade)
+            }
 
             if isOverview, !map.loading, map.error == nil {
                 overview
             } else {
                 GlowCard(glow: .blue, style: .plain, padding: 10) {
                     GeometryReader { geo in
-                        let tiles = tiles
+                        // Nothing under the veil: the previous folder (or the whole-Mac tour) would
+                        // show through as the wrong map.
+                        let tiles = map.loading ? [] : tiles
                         let rects = Treemap.layout(tiles.map { Double($0.size) }, in: CGRect(origin: .zero, size: geo.size))
                         ZStack(alignment: .topLeading) {
                             ForEach(Array(tiles.enumerated()), id: \.element.id) { i, t in
@@ -221,6 +242,7 @@ struct AnalyzePage: View {
         }
         .confirmation($confirm)
         .onAppear { if map.result == nil, !map.loading, map.error == nil { map.reload() } }
+        .onChange(of: map.trail) { trashError = nil }
     }
 
     // MARK: - Whole-Mac overview
@@ -229,7 +251,9 @@ struct AnalyzePage: View {
         let placesList = entries.filter { !$0.isInsight }
         let insights = entries.filter(\.isInsight)
         return VStack(alignment: .leading, spacing: 18) {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 14)], spacing: 14) {
+            // An even grid: three across for 3 or 6 places, otherwise two.
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: placesList.count % 3 == 0 ? 3 : 2),
+                      spacing: 14) {
                 ForEach(Array(placesList.enumerated()), id: \.element.id) { i, entry in
                     Button { map.open(entry.path) } label: {
                         GlowCard(glow: [Glow.blue, .violet, .magenta, .sage][i % 4], style: .core, padding: 18) {
@@ -384,9 +408,12 @@ struct AnalyzePage: View {
                                 message: "\(entry.size.bytesText) at \((entry.path as NSString).abbreviatingWithTildeInPath). You can restore it from the Trash.",
                                 button: "Move to Trash") {
                     if Trash.move([entry.path]).isEmpty {
+                        trashError = nil
                         map.reload()
                     } else {
-                        map.error = "\(entry.name) could not be moved to the Trash. It may belong to macOS or another user."
+                        withAnimation(Motion.quick) {
+                            trashError = "\(entry.name) could not be moved to the Trash. It may belong to macOS or another user."
+                        }
                     }
                 }
             }

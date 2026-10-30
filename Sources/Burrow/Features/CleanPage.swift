@@ -9,13 +9,16 @@ struct CleanPage: View {
     var body: some View {
         let report = scan.current
         VStack(alignment: .leading, spacing: 22) {
-            HeroCard(glow: .magenta, label: scan.scanning ? "Found so far" : "Ready to clean", bytes: report?.bytes,
-                     detail: scan.report?.summary.first(where: { $0.contains("Potential") }) ?? "Mole previews everything first. Nothing is removed until you press Clean.",
+            // While scanning, the running row sum; afterwards Mole's de-duplicated total.
+            HeroCard(glow: .magenta, label: scan.scanning ? "Found so far" : "Ready to clean",
+                     bytes: scan.scanning ? report?.bytes : report?.total,
+                     atLeast: !scan.scanning && (report?.potentialIsLowerBound ?? false),
+                     detail: detail,
                      scanning: scan.scanning, progress: progress, started: scan.startedAt, error: scan.error) {
                 ScanButton(scanning: scan.scanning, start: scan.start, stop: scan.cancel)
                 Button("Clean now") { askToClean() }
                     .buttonStyle(.pill)
-                    .disabled(scan.scanning || (scan.report?.bytes ?? 0) == 0)
+                    .disabled(scan.scanning || (scan.report?.total ?? 0) == 0)
             }
 
             HStack(spacing: 14) {
@@ -47,12 +50,18 @@ struct CleanPage: View {
         .onAppear(perform: scan.startIfNeeded)
     }
 
+    private var detail: String {
+        guard let report = scan.report else { return "Mole previews everything first. Nothing is removed until you press Clean." }
+        let tally = report.tally.map { $0 + ". " } ?? ""
+        return tally + "Files listed twice below are counted once."
+    }
+
     private var progress: String {
         [scan.section, scan.status].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     private func askToClean() {
-        let size = scan.report?.bytes.bytesText ?? ""
+        let size = (scan.report?.total.bytesText ?? "") + (scan.report?.potentialIsLowerBound == true ? "+" : "")
         confirm = .init(title: "Clean \(size)?",
                         message: "Mole removes the caches and logs listed here. Protected paths are skipped."
                             + (includeSystem ? " System caches need your administrator password." : ""),
@@ -138,9 +147,15 @@ struct OptimizePage: View {
                         }
                     }
                 }
-                Label("Preview of what Optimize checks and would do. Nothing has run yet.", systemImage: "eye")
-                    .font(.system(size: 12.5)).foregroundStyle(Theme.secondaryText)
-                SectionGrid(sections: report.sections, glow: .sage, badge: "Preview")
+                HStack(spacing: 8) {
+                    Image(systemName: "eye")
+                    Text("Preview. Mole words each step as done, but nothing has run until you press Optimize.")
+                }
+                .font(.system(size: 12.5, weight: .medium)).foregroundStyle(.white.opacity(0.85))
+                .padding(.horizontal, 14).frame(height: 32)
+                .background(Capsule().fill(Glow.sage.color.opacity(0.22)))
+                .overlay(Pill().strokeBorder(Glow.sage.color.opacity(0.5)))
+                SectionGrid(sections: report.sections, glow: .sage, preview: true)
             } else if scan.error != nil {
                 EmptyState(symbol: "exclamationmark.triangle", text: "The check did not finish",
                            detail: scan.error ?? "", actionTitle: "Try again", action: scan.start)

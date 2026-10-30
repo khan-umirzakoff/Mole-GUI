@@ -80,7 +80,8 @@ final class Scan<Report>: ObservableObject {
         let text = TerminalText.visible(line)
         if text.hasPrefix("➤") {
             section = String(text.dropFirst()).trimmingCharacters(in: .whitespaces)
-        } else if let first = text.first, "→✓⊙◎".contains(first) {
+        } else if progressFile == nil, let first = text.first, "→✓⊙◎".contains(first) {
+            // With a progress file, that file alone says where Mole is (no flicker between two sources).
             status = Self.describe(text)
         }
         // Re-parsing the whole output is cheap but not free; a few times a second is plenty.
@@ -103,6 +104,7 @@ final class Scan<Report>: ObservableObject {
     /// "→ User app cache · 38 items, 1.41GB dry" → "User app cache".
     nonisolated static func describe(_ line: String) -> String {
         let body = String(line.dropFirst()).trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: "[DRY RUN] ", with: "")
         let name = body.components(separatedBy: " · ").first ?? body
         return name.components(separatedBy: ", ").first ?? name
     }
@@ -114,6 +116,8 @@ struct HeroCard<Actions: View>: View {
     let glow: Glow
     let label: String
     let bytes: Int64?
+    /// The figure is a lower bound (Mole could not size everything): shown as "GB+".
+    var atLeast = false
     let detail: String
     var scanning = false
     var progress = ""
@@ -153,7 +157,7 @@ struct HeroCard<Actions: View>: View {
                 .symbolRenderingMode(.multicolor)
                 .help(error)
         } else if let bytes, !(scanning && bytes == 0) {
-            MetricValue(value: bytes.metric.value, unit: bytes.metric.unit, dot: 7, live: scanning)
+            MetricValue(value: bytes.metric.value, unit: bytes.metric.unit + (atLeast ? "+" : ""), dot: 7, live: scanning)
         } else if scanning {
             Text("Looking…").font(.system(size: 26, weight: .medium)).shimmer()
         } else {
@@ -189,7 +193,7 @@ struct ScanningBadge: View {
         .padding(.horizontal, 11)
         .frame(height: 26)
         .background(Capsule().fill(.black.opacity(0.35)))
-        .overlay(Capsule().strokeBorder(.white.opacity(0.12)))
+        .overlay(Pill().strokeBorder(.white.opacity(0.12)))
         .accessibilityElement(children: .combine)
     }
 }
@@ -210,8 +214,8 @@ struct Elapsed: View {
 struct SectionGrid: View {
     let sections: [ReportSection]
     var glow: Glow = .graphite
-    /// A tag on each card, for previews whose lines Mole words as if already done.
-    var badge: String?
+    /// Lines Mole words as if already done ("DNS cache refreshed") get hollow bullets: not yet.
+    var preview = false
 
     var body: some View {
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 18, alignment: .top), GridItem(.flexible(), spacing: 18, alignment: .top)],
@@ -225,9 +229,8 @@ struct SectionGrid: View {
                             if section.bytes > 0 {
                                 Text(section.bytes.bytesText).font(.system(size: 13, weight: .semibold)).monospacedDigit()
                             }
-                            if let badge { Tag(text: badge, color: Glow.blue.color) }
                         }
-                        ForEach(section.items) { item in ReportRow(item: item) }
+                        ForEach(section.items) { item in ReportRow(item: item, preview: preview) }
                     }
                 }
                 .transition(.blurFade)
@@ -239,10 +242,18 @@ struct SectionGrid: View {
 
 struct ReportRow: View {
     let item: ReportItem
+    var preview = false
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Circle().fill(dotColor).frame(width: 6, height: 6).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+            Group {
+                if preview && item.kind == .action {
+                    Circle().strokeBorder(dotColor, lineWidth: 1.3)
+                } else {
+                    Circle().fill(dotColor)
+                }
+            }
+            .frame(width: 7, height: 7).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.name).font(.system(size: 13)).foregroundStyle(item.kind == .ok ? Theme.secondaryText : .white)
                 if !cleanDetail.isEmpty {
@@ -417,7 +428,7 @@ struct SelectionBar<Actions: View>: View {
                                               startRadius: 0, endRadius: 420))
             }
         }
-        .overlay(Capsule().strokeBorder(.white.opacity(0.16)))
+        .overlay(Pill().strokeBorder(.white.opacity(0.16)))
         .shadow(color: .black.opacity(0.5), radius: 24, y: 10)
         .shadow(color: glow.color.opacity(0.25), radius: 30, y: 6)
         .animation(Motion.quick, value: title)

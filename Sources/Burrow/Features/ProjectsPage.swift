@@ -32,7 +32,16 @@ struct ProjectsPage: View {
                     .buttonStyle(.pillSecondary)
             }
 
-            if let report { Notes(notes: report.notes) }
+            if let report, !report.notes.isEmpty {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Notes(notes: report.notes)
+                    if report.skippedRoots.contains(where: ConfigList.isHome) {
+                        Button("Change scan folders") { model.page = .settings }
+                            .buttonStyle(.plain).font(.system(size: 12.5, weight: .medium)).foregroundStyle(Glow.blue.color)
+                            .help("Your whole home folder is a scan folder; it is too large to finish")
+                    }
+                }
+            }
             if !failed.isEmpty {
                 Label("\(failed.count) folder\(failed.count == 1 ? "" : "s") could not be moved to the Trash", systemImage: "exclamationmark.triangle.fill")
                     .font(.system(size: 12.5)).foregroundStyle(Theme.danger)

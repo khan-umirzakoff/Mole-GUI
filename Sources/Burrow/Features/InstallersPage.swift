@@ -108,8 +108,9 @@ struct InstallersPage: View {
                             Text(file.name).font(.system(size: 13, weight: .medium)).lineLimit(1).truncationMode(.middle)
                             Text("\(file.folder) · \(file.modified.formatted(.relative(presentation: .named)))").caption().lineLimit(1)
                         }
-                        Spacer(minLength: 0)
+                        Spacer(minLength: 8)
                         Text(file.bytes.bytesText).font(.system(size: 12, design: .monospaced))
+                            .frame(width: 78, alignment: .trailing)
                     }
                     .contextMenu {
                         Button("Show in Finder") { NSWorkspace.shared.selectFile(file.path, inFileViewerRootedAtPath: "") }

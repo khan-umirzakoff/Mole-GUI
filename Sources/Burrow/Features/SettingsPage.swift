@@ -54,6 +54,8 @@ struct SettingsPage: View {
                                 ? "Your whole home folder is slow to scan and can time out. Project folders work best." : "",
                              glow: .blue, entries: $purgePaths) { ConfigList.purgePaths.write($0) }
             }
+            // Cards in a row share the height of the taller one's content, never a fixed height.
+            .fixedSize(horizontal: false, vertical: true)
 
             HStack(alignment: .top, spacing: 18) {
                 GlowCard(glow: .violet, style: .core) {
@@ -77,12 +79,11 @@ struct SettingsPage: View {
                         }
                     }
                 }
-                .frame(height: 210)
 
                 GlowCard(glow: .graphite, style: .plain) {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("About").cardTitle()
-                        Text("Burrow is a free, open-source window for Mole \(Mole.version), the macOS cleaner by tw93. Clean, Uninstall, Optimize, Slim and removing all build folders run through Mole with its safety checks. Installers, single build folders and Disk Map items you pick go to the Trash.").caption()
+                        Text("A free, open-source window for Mole \(Mole.version), the macOS cleaner by tw93. Clean, Uninstall, Optimize, Slim and removing all build folders run through Mole and its safety checks; installers, single build folders and Disk Map items you pick go to the Trash.").caption()
                         Text("Licensed GPL-3.0, like Mole.").caption()
                         Spacer(minLength: 0)
                         HStack {
@@ -95,8 +96,8 @@ struct SettingsPage: View {
                         }
                     }
                 }
-                .frame(height: 210)
             }
+            .fixedSize(horizontal: false, vertical: true)
 
             GlowCard(glow: .ember, style: .rim, padding: 22) {
                 HStack {
@@ -108,7 +109,6 @@ struct SettingsPage: View {
                     Button("Remove…") { askToRemoveApp() }.buttonStyle(.pillDanger)
                 }
             }
-            .frame(height: 120)
         }
         .confirmation($confirm)
         .task {
@@ -213,6 +213,7 @@ private struct PathListCard: View {
                         .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     }
                 }
+                Spacer(minLength: 0)
                 HStack {
                     TextField("Add a path", text: $draft)
                         .textFieldStyle(.plain).padding(.horizontal, 12).frame(height: 32)

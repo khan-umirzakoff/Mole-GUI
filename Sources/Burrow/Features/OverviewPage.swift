@@ -64,7 +64,7 @@ struct OverviewPage: View {
             HStack(spacing: 18) {
                 processesCard(s).frame(maxWidth: .infinity)
                 VStack(spacing: 14) {
-                    ScanQuickAction(title: "Caches and logs", scan: model.clean, glow: .magenta, bytes: \.bytes) {
+                    ScanQuickAction(title: "Caches and logs", scan: model.clean, glow: .magenta, bytes: \.total, liveBytes: \.bytes) {
                         model.page = .clean
                     }
                     ScanQuickAction(title: "Project build folders", scan: model.purge, glow: .blue, bytes: \.bytes) {
@@ -257,7 +257,9 @@ struct ScanQuickAction<Report>: View {
     let title: String
     @ObservedObject var scan: Scan<Report>
     let glow: Glow
+    /// The finished figure, and the running one while Mole scans (they differ for Clean).
     let bytes: KeyPath<Report, Int64>
+    var liveBytes: KeyPath<Report, Int64>?
     let action: () -> Void
 
     var body: some View {
@@ -265,15 +267,16 @@ struct ScanQuickAction<Report>: View {
     }
 
     private var value: String {
-        if let r = scan.current { return r[keyPath: bytes].bytesText }
+        if scan.scanning, let r = scan.current { return r[keyPath: liveBytes ?? bytes].bytesText }
+        if let r = scan.report { return r[keyPath: bytes].bytesText }
         if scan.scanning { return "Scanning…" }
-        return scan.error == nil ? "Preview" : "Try again"
+        return scan.error == nil ? "Check now" : "Try again"
     }
 
     private var detail: String {
         if scan.scanning { return "Found so far" }
         if let at = scan.finishedAt { return "Checked \(at.formatted(.relative(presentation: .named)))" }
-        return scan.error == nil ? "Not checked yet" : "The last scan did not finish"
+        return scan.error == nil ? "Scan to see what Mole can free" : "The last scan did not finish"
     }
 }
 
