@@ -22,7 +22,7 @@ struct ProjectsPage: View {
     var body: some View {
         let report = scan.current
         VStack(alignment: .leading, spacing: 20) {
-            HeroCard(glow: .blue, label: scan.scanning ? "Found so far" : "Build folders found", bytes: report?.bytes,
+            HeroCard(glow: .blue, label: scan.scanning ? (report == nil ? "Scanning" : "Found so far") : "Build folders found", bytes: report?.bytes,
                      detail: "node_modules, .next, dist, target, .venv and other folders a reinstall or build brings back.",
                      scanning: scan.scanning || removing,
                      progress: removing ? "Moving folders to the Trash…" : scan.status.isEmpty ? "" : "Looking in \(scan.status)",

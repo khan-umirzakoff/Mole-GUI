@@ -138,7 +138,7 @@ struct OverviewPage: View {
                 MetricValue(value: String(format: "%.0f", s?.cpu?.usage ?? 0), unit: "%", dot: 4.5, live: true)
                 BarSpark(values: s?.cpu?.per_core ?? [], color: .white, maxValue: 100)
                     .frame(height: 34)
-                Text("Load \(String(format: "%.2f", s?.cpu?.load1 ?? 0)) · \(s?.procs ?? 0) processes").caption()
+                Text("Load \(String(format: "%.2f", s?.cpu?.load1 ?? 0)) · \(s?.procs ?? 0) procs").caption()
                 Spacer(minLength: 0)
             }
         }

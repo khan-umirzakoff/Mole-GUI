@@ -98,8 +98,13 @@ enum LeftoverScanner {
         if matches(path + "/*") || patterns.contains(where: { String($0.prefix { !"*?[".contains($0) }).hasPrefix(path + "/") }) {
             return true
         }
-        guard let inside = FileManager.default.enumerator(atPath: path) else { return false }
-        for case let sub as String in inside where matches(path + "/" + sub) { return true }
+        // Walk the entry only for globs that could reach inside it (`~/*/keep.db`).
+        let globs = patterns.filter { p in
+            let fixed = String(p.prefix { !"*?[".contains($0) })
+            return fixed.count < p.count && path.hasPrefix(fixed)
+        }
+        guard !globs.isEmpty, let inside = FileManager.default.enumerator(atPath: path) else { return false }
+        for case let sub as String in inside where globs.contains(where: { fnmatch($0, path + "/" + sub, 0) == 0 }) { return true }
         return false
     }
 
@@ -178,7 +183,7 @@ enum LeftoverScanner {
 
     /// Bundle ids of every app Spotlight knows (all indexed volumes), in the usual folders and
     /// running now, lowercased. Apps in the Trash do not count. nil when Spotlight did not answer
-    /// in time, and then nothing is offered.
+    /// in time or had no answer, and then nothing is offered.
     nonisolated static func installedIDs() -> Set<String>? {
         let fm = FileManager.default
         var ids = Set(NSWorkspace.shared.runningApplications.compactMap { $0.bundleIdentifier?.lowercased() })
@@ -188,15 +193,15 @@ enum LeftoverScanner {
         let out = Pipe()
         mdfind.standardOutput = out
         mdfind.standardError = FileHandle.nullDevice
-        if (try? mdfind.run()) != nil {
-            let pid = mdfind.processIdentifier
-            DispatchQueue.global().asyncAfter(deadline: .now() + 30) { if mdfind.isRunning { kill(pid, SIGKILL) } }
-            let paths = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).split(separator: "\n")
-            mdfind.waitUntilExit()
-            guard mdfind.terminationReason == .exit else { return nil }
-            for path in paths where !path.contains("/.Trash/") {
-                if let id = Bundle(path: String(path))?.bundleIdentifier { ids.insert(id.lowercased()) }
-            }
+        guard (try? mdfind.run()) != nil else { return nil }
+        let pid = mdfind.processIdentifier
+        DispatchQueue.global().asyncAfter(deadline: .now() + 30) { if mdfind.isRunning { kill(pid, SIGKILL) } }
+        let paths = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).split(separator: "\n")
+        mdfind.waitUntilExit()
+        // A stalled, failed or empty answer (indexing off) cannot rule out apps elsewhere.
+        guard mdfind.terminationReason == .exit, mdfind.terminationStatus == 0, !paths.isEmpty else { return nil }
+        for path in paths where !path.contains("/.Trash/") {
+            if let id = Bundle(path: String(path))?.bundleIdentifier { ids.insert(id.lowercased()) }
         }
         let roots = ["/Applications", "/System/Applications", "/Library/Application Support",
                      fm.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path,
@@ -240,10 +245,10 @@ final class LeftoverStore: ObservableObject {
     /// the scan already running instead of being dropped.
     func load() async {
         if let loadTask { return await loadTask.value }
-        let task = Task { await scan() }
+        // The task clears itself, so a caller resuming late never joins a finished scan.
+        let task = Task { await scan(); loadTask = nil }
         loadTask = task
         await task.value
-        loadTask = nil
     }
 
     private func scan() async {
@@ -318,7 +323,7 @@ struct LeftoversView: View {
                             Text(left.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
                             Text(left.bundleID).font(.system(size: 11, design: .monospaced))
                                 .foregroundStyle(Theme.tertiaryText).lineLimit(1).truncationMode(.middle)
-                            Text("\(left.kinds.map(\.rawValue).joined(separator: ", ")) · changed \(left.lastUsed.formatted(.relative(presentation: .named)))")
+                            Text("Changed \(left.lastUsed.formatted(.relative(presentation: .named))) · \(left.kinds.map(\.rawValue).joined(separator: ", "))")
                                 .caption().lineLimit(1)
                         }
                         Spacer(minLength: 8)
