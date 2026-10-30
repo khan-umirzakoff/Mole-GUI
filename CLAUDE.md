@@ -48,8 +48,12 @@ engine/backend code.
 GitHub releases carry `Burrow.dmg` (`scripts/dmg.sh`) and `Burrow.zip`
 (`ditto -c -k --keepParent build/Burrow.app`). Bump `VERSION`, build, test, then
 `gh release create v<version>`.
-`scripts/demo-video.sh` re-records `docs/demo.mp4` (the `-tour` walk, screen-recorded with
-`screencapture -v`; `cacheDisplay` misses SwiftUI transitions). The window must stay uncovered ~45 s.
+`scripts/demo-video.sh` records the full tour (`build/demo.mp4`, a release asset, plus
+`build/demo-raw.mov`): the `-tour` walk, screen-recorded with `screencapture -v` (`cacheDisplay`
+misses SwiftUI transitions); the window must stay uncovered ~45 s. `promo/` is the 17 s HyperFrames
+edit of that raw take: copy it to `promo/assets/screen.mov`, check the cut times in `index.html`, then
+`npx hyperframes@0.8.214 render promo -o build/promo.mp4` (and `-c gif.html` for the README GIF,
+`docs/demo.gif`, kept under 10 MB).
 
 ## Performance
 Nothing may animate forever behind the content: a repeating animation inside a large layer makes

@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=1600, height=1000" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;800;900&display=swap" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+<style>
+  :root { --font: "Inter", -apple-system, "SF Pro Display", Helvetica, Arial, sans-serif; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1600px; height: 1000px; overflow: hidden; background: #050507; font-family: var(--font); color: #fff; }
+  #root { position: relative; width: 100%; height: 100%; overflow: hidden; }
+  .clip { position: absolute; }
+  #bg { inset: 0; background: #050507; }
+  #glow { left: 300px; top: 120px; width: 1000px; height: 900px; border-radius: 50%; filter: blur(140px);
+          background: #3B5BFF; opacity: 0; }
+  #dots { inset: 0; background-image: radial-gradient(rgba(255,255,255,.07) 1.2px, transparent 1.3px); background-size: 18px 18px; }
+
+  #intro { inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; }
+  #intro img { width: 168px; height: 168px; }
+  #intro h1 { font-size: 112px; font-weight: 900; letter-spacing: -0.045em; line-height: 1; }
+  #intro p { font-size: 34px; font-weight: 600; color: rgba(255,255,255,.62); letter-spacing: -0.01em; }
+
+  #frame { position: absolute; left: 160px; top: 172px; width: 1280px; height: 800px; border-radius: 22px; overflow: hidden;
+           box-shadow: 0 50px 120px rgba(0,0,0,.65), 0 0 0 1px rgba(255,255,255,.10); opacity: 0; }
+  #frame video { left: 0; top: 0; width: 1280px; height: 800px; object-fit: cover; }
+
+  .cap { left: 160px; top: 52px; display: flex; align-items: baseline; gap: 22px; }
+  .cap .n { font-size: 28px; font-weight: 800; color: rgba(255,255,255,.38); font-variant-numeric: tabular-nums; }
+  .cap .t { font-size: 62px; font-weight: 900; letter-spacing: -0.035em; line-height: 1.05; display: flex; gap: 16px; }
+  .cap .t span { display: inline-block; }
+  #chip { right: 160px; top: 70px; display: flex; align-items: center; gap: 12px; font-size: 26px; font-weight: 700;
+          color: rgba(255,255,255,.75); }
+  #chip img { width: 38px; height: 38px; }
+
+  #outro { inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; text-align: center; }
+  #outro img { width: 150px; height: 150px; }
+  #outro h2 { font-size: 104px; font-weight: 900; letter-spacing: -0.045em; line-height: 1; }
+  #outro .tag { font-size: 34px; font-weight: 700; color: #fff; }
+  #outro .pills { display: flex; gap: 14px; margin-top: 8px; }
+  #outro .pill { font-size: 26px; font-weight: 700; padding: 12px 24px; border-radius: 999px; background: rgba(255,255,255,.10);
+                 border: 1px solid rgba(255,255,255,.16); color: rgba(255,255,255,.9); }
+  #outro .url { font-size: 28px; font-weight: 800; color: #050507; background: #fff; padding: 16px 32px; border-radius: 999px; margin-top: 14px; }
+  #outro .credit { font-size: 26px; font-weight: 600; color: rgba(255,255,255,.45); margin-top: 6px; }
+</style>
+</head>
+<body>
+<div id="root" data-composition-id="main" data-start="0" data-duration="17.4" data-width="1600" data-height="1000" data-fps="30">
+  <div id="bg" class="clip" data-start="0" data-duration="17.4"></div>
+  <div id="glow" class="clip" data-start="0" data-duration="17.4"></div>
+  <div id="dots" class="clip" data-start="0" data-duration="17.4"></div>
+
+  <div id="intro" class="clip" data-start="0" data-duration="2.2">
+    <img src="assets/icon.png" alt="" />
+    <h1>Burrow</h1>
+    <p>The free, open-source Mac cleaner</p>
+  </div>
+
+  <div id="frame">
+    <video id="v1" class="clip" data-start="2.0" data-duration="1.8" data-media-start="0.6" src="assets/screen.mov" muted playsinline></video>
+    <video id="v2" class="clip" data-start="3.8" data-duration="2.2" data-media-start="5.1" src="assets/screen.mov" muted playsinline></video>
+    <video id="v3" class="clip" data-start="6.0" data-duration="2.4" data-media-start="11.0" src="assets/screen.mov" muted playsinline></video>
+    <video id="v4" class="clip" data-start="8.4" data-duration="1.8" data-media-start="16.6" src="assets/screen.mov" muted playsinline></video>
+    <video id="v5" class="clip" data-start="10.2" data-duration="2.2" data-media-start="20.5" src="assets/screen.mov" muted playsinline></video>
+    <video id="v6" class="clip" data-start="12.4" data-duration="2.2" data-media-start="28.7" src="assets/screen.mov" muted playsinline></video>
+  </div>
+
+
+  <div id="c1" class="cap clip" data-start="2.0" data-duration="1.8"><span class="n">01</span><span class="t"><span>Live</span><span>health</span><span>of</span><span>your</span><span>Mac</span></span></div>
+  <div id="c2" class="cap clip" data-start="3.8" data-duration="2.2"><span class="n">02</span><span class="t"><span>Free</span><span>up</span><span>gigabytes</span><span>safely</span></span></div>
+  <div id="c3" class="cap clip" data-start="6.0" data-duration="2.4"><span class="n">03</span><span class="t"><span>Find</span><span>leftovers</span><span>of</span><span>deleted</span><span>apps</span></span></div>
+  <div id="c4" class="cap clip" data-start="8.4" data-duration="1.8"><span class="n">04</span><span class="t"><span>One-click</span><span>maintenance</span></span></div>
+  <div id="c5" class="cap clip" data-start="10.2" data-duration="2.2"><span class="n">05</span><span class="t"><span>See</span><span>what</span><span>fills</span><span>your</span><span>disk</span></span></div>
+  <div id="c6" class="cap clip" data-start="12.4" data-duration="2.2"><span class="n">06</span><span class="t"><span>Slim</span><span>universal</span><span>apps</span></span></div>
+
+  <div id="outro" class="clip" data-start="14.5" data-duration="2.9">
+    <img src="assets/icon.png" alt="" />
+    <h2>Burrow</h2>
+    <div class="tag">A native Mac app for the Mole cleaner</div>
+    <div class="pills"><span class="pill">Free</span><span class="pill">Open source · GPL-3.0</span><span class="pill">Native SwiftUI</span></div>
+    <div class="url">github.com/khan-umirzakoff/Mole-GUI</div>
+    <div class="credit">Built on Mole by tw93 · unofficial</div>
+  </div>
+</div>
+<script>
+  const tl = gsap.timeline({ paused: true });
+  const hues = ["#3B5BFF", "#E0359B", "#FF6A2B", "#2FA37A", "#7A4DFF", "#E0359B"];
+  const starts = [2.0, 3.8, 6.0, 8.4, 10.2, 12.4];
+  const durs = [1.8, 2.2, 2.4, 1.8, 2.2, 2.2];
+  const origins = ["30% 28%", "45% 22%", "50% 35%", "50% 25%", "55% 38%", "50% 30%"];
+
+  // Intro: icon pops, name and line rise, then the whole card lifts away.
+  tl.fromTo("#intro img", {scale: 0.9}, {scale: 1, duration: 0.6, ease: "back.out(2.2)"}, 0);
+  tl.fromTo("#intro h1", {y: 12}, {y: 0, duration: 0.45, ease: "power4.out"}, 0);
+  tl.fromTo("#intro p", {y: 24, opacity: 0}, {y: 0, opacity: 1, duration: 0.45, ease: "power4.out"}, 0.1);
+  tl.to("#intro", {scale: 1.12, opacity: 0, filter: "blur(10px)", duration: 0.35, ease: "power2.in"}, 1.85);
+  gsap.set("#glow", {opacity: 0.55});
+
+  // The window flies in.
+  tl.fromTo("#frame", {y: 140, scale: 0.86, opacity: 0, rotateX: 14}, {y: 0, scale: 1, opacity: 1, rotateX: 0, duration: 0.6, ease: "expo.out"}, 1.95);
+
+  starts.forEach((s, i) => {
+    const v = "#v" + (i + 1), c = "#c" + (i + 1);
+    // A punch on every cut, then a slow push toward the part that matters.
+    tl.fromTo(v, {scale: i === 0 ? 1 : 1.06}, {scale: 1, duration: 0.35, ease: "power3.out"}, s);
+    gsap.set(v, {transformOrigin: origins[i]});
+    tl.to(v, {scale: 1.07, duration: durs[i] - 0.35, ease: "sine.inOut"}, s + 0.35);
+    tl.to("#glow", {backgroundColor: hues[i], duration: 0.5, ease: "power2.out"}, s);
+    if (i > 0) tl.fromTo("#frame", {y: 10}, {y: 0, duration: 0.3, ease: "power3.out"}, s);
+    tl.fromTo(c + " .n", {opacity: 0, x: -14}, {opacity: 1, x: 0, duration: 0.3, ease: "power3.out"}, s + 0.02);
+    tl.fromTo(c + " .t span", {y: 46, opacity: 0, rotate: 4}, {y: 0, opacity: 1, rotate: 0, duration: 0.42, stagger: 0.05, ease: "power4.out"}, s + 0.04);
+    tl.to(c + " .t span", {y: -24, opacity: 0, duration: 0.18, stagger: 0.02, ease: "power2.in"}, s + durs[i] - 0.2);
+  });
+
+  // Outro: the window falls back, the card lands.
+  tl.to("#frame", {scale: 0.82, y: 60, opacity: 0, filter: "blur(8px)", duration: 0.45, ease: "power3.in"}, 14.25);
+  tl.to("#glow", {backgroundColor: "#5B4BFF", opacity: 0.7, duration: 0.6}, 14.4);
+  tl.fromTo("#outro img", {scale: 0.5, opacity: 0}, {scale: 1, opacity: 1, duration: 0.5, ease: "back.out(2.2)"}, 14.55);
+  tl.fromTo("#outro h2, #outro .tag, #outro .pills, #outro .url, #outro .credit", {y: 30, opacity: 0},
+            {y: 0, opacity: 1, duration: 0.45, stagger: 0.08, ease: "power4.out"}, 14.6);
+  tl.fromTo("#outro .url", {scale: 0.92}, {scale: 1, duration: 0.5, ease: "back.out(2.5)"}, 14.9);
+
+  window.__timelines = window.__timelines || {};
+  window.__timelines["main"] = tl;
+  tl.seek(0);
+</script>
+</body>
+</html>

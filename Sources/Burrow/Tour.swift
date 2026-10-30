@@ -22,12 +22,21 @@ enum Tour {
         (3, { $0.page = .overview }),
     ]
 
-    static func start(_ model: AppModel, into folder: String) {
+    static func start(_ model: AppModel, into folder: String, waited: Double = 0) {
         guard let window = NSApp.windows.first(where: \.isVisible), let screen = NSScreen.screens.first else { return }
+        // Start once the live status and the leftovers are on hand, so no page shows a placeholder.
+        let ready = model.status.status != nil && model.leftovers.leftovers != nil
+        if !ready, waited < 60 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                MainActor.assumeIsolated { start(model, into: folder, waited: waited + 0.25) }
+            }
+            return
+        }
         window.setContentSize(NSSize(width: 1280, height: 800))
         window.center()
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        NSCursor.setHiddenUntilMouseMoves(true)
         let f = window.frame
         let rect = "\(Int(f.minX)),\(Int(screen.frame.maxY - f.maxY)),\(Int(f.width)),\(Int(f.height))"
         try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)

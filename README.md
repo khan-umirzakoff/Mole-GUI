@@ -1,14 +1,35 @@
+<div align="center">
+
+<img src="docs/icon.png" width="128" alt="Burrow icon" />
+
 # Burrow
 
-A free, open-source macOS app for [Mole](https://github.com/tw93/Mole), the deep cleaner by tw93.
-Everything Mole does in the terminal, in one window: clean, uninstall, optimize, map the disk,
-remove project build folders and old installers, slim universal apps, and watch system health.
+**The free, open-source Mac cleaner.** A native SwiftUI app for [Mole](https://github.com/tw93/Mole):
+clean caches, uninstall apps with their leftovers, map your disk and watch your Mac's health.
 
-![Overview](docs/overview.jpg)
+[![Release](https://img.shields.io/github/v/release/khan-umirzakoff/Mole-GUI?color=7a4dff)](../../releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/khan-umirzakoff/Mole-GUI/total?color=e0359b)](../../releases)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-2fa37a)](LICENSE)
+[![macOS 26+](https://img.shields.io/badge/macOS-26%2B-111?logo=apple)](#install)
+[![Stars](https://img.shields.io/github/stars/khan-umirzakoff/Mole-GUI?style=flat&color=ff6a2b)](../../stargazers)
 
-**Demo (41 s):** every page and the moves between them.
+**[⬇ Download Burrow.dmg](../../releases/latest/download/Burrow.dmg)** · [Full 41 s tour](../../releases/download/v0.3.0/demo.mp4) · [What's new](../../releases/latest)
 
-[![Burrow demo video](docs/demo-poster.jpg)](docs/demo.mp4)
+<img src="docs/demo.gif" width="880" alt="Burrow in 17 seconds: live health, clean, leftovers of deleted apps, maintenance, disk map, slim apps" />
+
+</div>
+
+## Burrow and the alternatives
+
+| | **Burrow** | Mole for Mac | CleanMyMac |
+|---|---|---|---|
+| Price | **Free** | $19 | Paid subscription |
+| Source code | **Open, GPL-3.0** | Not public | Closed |
+| Cleaning engine | Mole CLI, bundled and unchanged | Mole | Its own |
+| Deletes through | Mole's safety checks, or the Trash | Mole | Its own rules |
+
+No account, no ads, no telemetry. Burrow is a community project, not affiliated with Mole or tw93. Mole's own native app is
+[Mole for Mac](https://mole.fit/); if Burrow is useful to you, consider supporting Mole's author too.
 
 ## Why
 
