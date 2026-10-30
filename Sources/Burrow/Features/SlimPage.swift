@@ -5,6 +5,7 @@ struct SlimPage: View {
     @ObservedObject var scan: Scan<SlimReport>
     @ViewState private var selected = Set<String>()
 
+    private var allSelected: Bool { !selected.isEmpty && selected.count == (scan.report?.apps.count ?? 0) }
     private var selectedBytes: Int64 { (scan.report?.apps ?? []).filter { selected.contains($0.name) }.map(\.bytes).reduce(0, +) }
 
     var body: some View {
@@ -14,6 +15,11 @@ struct SlimPage: View {
                      scanning: scan.scanning, progress: "Reading the architecture of every app",
                      started: scan.startedAt, error: scan.error) {
                 ScanButton(scanning: scan.scanning, start: scan.start, stop: scan.cancel)
+                Button(allSelected ? "Select none" : "Select all") {
+                    selected = allSelected ? [] : Set((scan.report?.apps ?? []).map(\.name))
+                }
+                .buttonStyle(.pillSecondary)
+                .disabled(scan.scanning || (scan.report?.apps ?? []).isEmpty)
             }
 
             if let apps = scan.report?.apps {
@@ -28,7 +34,7 @@ struct SlimPage: View {
                                 AppIcon(path: appPath(app.name), size: 38)
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(app.name).font(.system(size: 13.5, weight: .medium)).lineLimit(1)
-                                    Text("\(app.bytes.bytesText) of Intel code").caption()
+                                    Text("\(app.bytes.bytesText) of Intel code").caption().lineLimit(1)
                                 }
                             }
                         }

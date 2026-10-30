@@ -134,10 +134,12 @@ struct OverviewPage: View {
         GlowCard(glow: .violet, style: .core, padding: 18) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack { Text("CPU").cardTitle(); Spacer(); Text(s?.hardware?.cpu_model ?? "").caption().lineLimit(1) }
+                    .frame(height: 24)
                 MetricValue(value: String(format: "%.0f", s?.cpu?.usage ?? 0), unit: "%", dot: 4.5, live: true)
                 BarSpark(values: s?.cpu?.per_core ?? [], color: .white, maxValue: 100)
                     .frame(height: 34)
                 Text("Load \(String(format: "%.2f", s?.cpu?.load1 ?? 0)) · \(s?.procs ?? 0) processes").caption()
+                Spacer(minLength: 0)
             }
         }
     }
@@ -146,11 +148,11 @@ struct OverviewPage: View {
         let m = s?.memory
         return GlowCard(glow: .magenta, style: .rim, padding: 18) {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Memory").cardTitle()
-                Spacer()
+                Text("Memory").cardTitle().frame(height: 24)
                 MetricValue(value: String(format: "%.0f", m?.used_percent ?? 0), unit: "%", dot: 4.5, live: true)
                 DotMeter(value: (m?.used_percent ?? 0) / 100, count: 22)
                 Text("\(m?.used.bytesText ?? "–") of \(m?.total.bytesText ?? "–")").caption()
+                Spacer(minLength: 0)
             }
         }
     }
@@ -160,7 +162,7 @@ struct OverviewPage: View {
         return GlowCard(glow: .ember, style: .core, padding: 18) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack { Text("Battery").cardTitle(); Spacer(); if let st = b?.status { Tag(text: st) } }
-                Spacer()
+                    .frame(height: 24)
                 if let b {
                     MetricValue(value: String(format: "%.0f", b.percent ?? 0), unit: "%", dot: 4.5, live: true)
                     Text([b.health, b.cycle_count.map { "\($0) cycles" }].compactMap { $0 }.joined(separator: " · ")).caption()
@@ -170,6 +172,7 @@ struct OverviewPage: View {
                     Text(s == nil ? "–" : "No battery, on power").caption()
                 }
                 if let w = s?.thermal?.system_power, w > 0 { Text(String(format: "Drawing %.1f W", w)).caption() }
+                Spacer(minLength: 0)
             }
         }
     }
@@ -180,12 +183,13 @@ struct OverviewPage: View {
         let tx = (s?.network ?? []).compactMap(\.tx_rate_mbs).reduce(0, +)
         return GlowCard(glow: .graphite, style: .core, padding: 18) {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Network").cardTitle()
+                Text("Network").cardTitle().frame(height: 24)
                 MetricValue(value: String(format: "%.1f", rx), unit: "MB/s in", dot: 4.5, live: true)
                 // A floor of 1 MB/s keeps an idle line flat instead of blowing tiny noise up to full height.
                 BarSpark(values: monitor.rxHistory, color: Theme.accent, maxValue: max(monitor.rxHistory.max() ?? 0, 1))
                     .frame(height: 34)
                 Text(String(format: "%.2f MB/s out", tx)).caption()
+                Spacer(minLength: 0)
             }
         }
     }
@@ -203,7 +207,7 @@ struct OverviewPage: View {
                         Text(p.name).font(.system(size: 13)).lineLimit(1)
                         Spacer()
                         DotMeter(value: min(p.cpu / 100, 1), count: 16, color: p.cpu > 80 ? Glow.ember.color : .white)
-                        Text(String(format: "%.0f%%", p.cpu)).font(.system(size: 12, design: .monospaced))
+                        Text(String(format: "%.0f%%", p.cpu)).font(.system(size: 12)).monospacedDigit()
                             .foregroundStyle(Theme.secondaryText).frame(width: 46, alignment: .trailing)
                     }
                     .accessibilityElement(children: .combine)

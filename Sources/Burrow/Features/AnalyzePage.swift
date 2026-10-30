@@ -114,6 +114,11 @@ enum TrashPolicy {
     /// Never touched at any depth, wherever they appear.
     static let never: Set<String> = [".ssh", ".gnupg", ".Trash", "Keychains", "Mobile Documents", "CloudStorage",
                                      "Mail", "Messages", "Containers", "Group Containers", "Accounts"]
+    /// Personal data and sync state in ~/Library/Application Support: contacts, iPhone backups,
+    /// call history, iCloud/File Provider sync, Siri knowledge. Apple's own `com.apple.*` too.
+    static let appSupportNever: Set<String> = ["AddressBook", "FileProvider", "MobileSync", "CallHistoryDB",
+                                               "CallHistoryTransactions", "Knowledge", "CloudDocs", "iCloud",
+                                               "Dock", "DifferentialPrivacy", "Photos", "Calendars"]
 
     static func allows(_ path: String, inside current: String?, home: String) -> Bool {
         guard let current else { return false } // the whole-Mac tour lists summaries, not items
@@ -126,7 +131,11 @@ enum TrashPolicy {
         let inHome = Array(item.pathComponents.dropFirst(homeURL.pathComponents.count))
         // Top-level home folders (Documents, Downloads, Projects…) hold everything else.
         guard inHome.count >= 2, inHome.allSatisfy({ !never.contains($0) }) else { return false }
-        if inHome[0] == "Library" { return libraryAllowed.contains(inHome[1]) && inHome.count >= 3 }
+        if inHome[0] == "Library" {
+            if inHome[1] == "Application Support",
+               inHome.dropFirst(2).contains(where: { appSupportNever.contains($0) || $0.hasPrefix("com.apple.") }) { return false }
+            return libraryAllowed.contains(inHome[1]) && inHome.count >= 3
+        }
         return !toolFolders.contains(inHome[0]) || inHome.count >= 3
     }
 }
@@ -247,6 +256,12 @@ struct AnalyzePage: View {
 
     // MARK: - Whole-Mac overview
 
+    /// "~/Library", but a bare "~" reads as a typo: say what it is.
+    private static func placeLabel(_ path: String) -> String {
+        let short = (path as NSString).abbreviatingWithTildeInPath
+        return short == "~" ? "Your home folder" : short
+    }
+
     private var overview: some View {
         let placesList = entries.filter { !$0.isInsight }
         let insights = entries.filter(\.isInsight)
@@ -264,8 +279,8 @@ struct AnalyzePage: View {
                                     Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .bold)).foregroundStyle(.black)
                                         .frame(width: 26, height: 26).background(Circle().fill(.white))
                                 }
-                                MetricValue(value: entry.size.metric.value, unit: entry.size.metric.unit, dot: 3.6)
-                                Text((entry.path as NSString).abbreviatingWithTildeInPath).caption().lineLimit(1)
+                                MetricValue(value: entry.size.metric.value, unit: entry.size.metric.unit, dot: 5)
+                                Text(Self.placeLabel(entry.path)).caption().lineLimit(1)
                             }
                         }
                     }
@@ -294,7 +309,7 @@ struct AnalyzePage: View {
                                 Spacer()
                                 if entry.cleanable == true { Tag(text: "Clean can remove", color: Theme.accent) }
                                 Text(entry.size > 0 ? entry.size.bytesText : "–")
-                                    .font(.system(size: 12.5, design: .monospaced)).frame(width: 84, alignment: .trailing)
+                                    .font(.system(size: 12.5)).monospacedDigit().frame(width: 84, alignment: .trailing)
                             }
                             .contentShape(Rectangle())
                             .onTapGesture { map.open(entry.path) }
@@ -386,7 +401,7 @@ struct AnalyzePage: View {
                         Text(entry.name).font(.system(size: 13)).lineLimit(1)
                         Spacer()
                         DotMeter(value: Double(entry.size) / top, count: 24, color: Glow.blue.color)
-                        Text(entry.size.bytesText).font(.system(size: 12.5, design: .monospaced)).frame(width: 84, alignment: .trailing)
+                        Text(entry.size.bytesText).font(.system(size: 12.5)).monospacedDigit().frame(width: 84, alignment: .trailing)
                     }
                     .contentShape(Rectangle())
                     .onTapGesture { if entry.isDirectory { map.open(entry.path) } }

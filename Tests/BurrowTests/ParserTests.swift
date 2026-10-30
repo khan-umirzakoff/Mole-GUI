@@ -69,6 +69,7 @@ struct BehaviourTests {
     @Test func zeroBytesStayNumeric() {
         #expect(Int64(0).metric.value.allSatisfy { $0.isNumber || $0 == "." || $0 == "," })
         #expect(ByteSize.format(0).contains("0"))
+        #expect(ByteSize.format(11_270_000_000) == "11.27 GB")
     }
 
     @Test func reportIdsSurviveReparse() {
@@ -211,6 +212,12 @@ struct TrashPolicyTests {
             #expect(!TrashPolicy.allows("/Users/me/Library/" + path, inside: "/Users/me/Library/" + folder, home: home), "\(path)")
         }
         #expect(!TrashPolicy.allows("/Users/me/Library/Application Support/MobileSync/Mail", inside: "/Users/me/Library/Application Support/MobileSync", home: home))
+        // Personal data and sync state in Application Support, and Apple's own folders there.
+        let support = "/Users/me/Library/Application Support"
+        for name in ["AddressBook", "FileProvider", "MobileSync", "CallHistoryDB", "Knowledge", "com.apple.sharedfilelist"] {
+            #expect(!TrashPolicy.allows(support + "/" + name, inside: support, home: home), "\(name)")
+        }
+        #expect(!TrashPolicy.allows(support + "/MobileSync/Backup", inside: support + "/MobileSync", home: home))
     }
 
     @Test func onlyDirectChildrenOfTheMappedFolder() {

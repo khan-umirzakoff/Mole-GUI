@@ -188,6 +188,13 @@ private struct PathListCard: View {
                     Label(warning, systemImage: "exclamationmark.triangle.fill")
                         .font(.system(size: 11.5)).foregroundStyle(.orange)
                 }
+                HStack {
+                    TextField("Add a path", text: $draft)
+                        .textFieldStyle(.plain).padding(.horizontal, 12).frame(height: 32)
+                        .background(Capsule().fill(.white.opacity(0.07)))
+                        .onSubmit(add)
+                    CircleIconButton(symbol: "folder.badge.plus", help: "Choose a folder") { choose() }
+                }
                 VStack(spacing: 6) {
                     if entries.isEmpty {
                         Text("None yet").font(.system(size: 12)).foregroundStyle(Theme.tertiaryText)
@@ -214,13 +221,6 @@ private struct PathListCard: View {
                     }
                 }
                 Spacer(minLength: 0)
-                HStack {
-                    TextField("Add a path", text: $draft)
-                        .textFieldStyle(.plain).padding(.horizontal, 12).frame(height: 32)
-                        .background(Capsule().fill(.white.opacity(0.07)))
-                        .onSubmit(add)
-                    CircleIconButton(symbol: "folder.badge.plus", help: "Choose a folder") { choose() }
-                }
             }
         }
     }

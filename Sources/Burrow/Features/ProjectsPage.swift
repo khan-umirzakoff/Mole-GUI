@@ -103,7 +103,7 @@ struct ProjectsPage: View {
                 }
                 Spacer()
                 ForEach(Array(Set(artifacts.map(\.kind))).sorted().prefix(3), id: \.self) { Tag(text: $0) }
-                Text(total.bytesText).font(.system(size: 13, weight: .semibold, design: .monospaced)).frame(width: 90, alignment: .trailing)
+                Text(total.bytesText).font(.system(size: 13, weight: .semibold)).monospacedDigit().frame(width: 90, alignment: .trailing)
                 Image(systemName: "chevron.down")
                     .rotationEffect(.degrees(expanded.contains(project) ? 180 : 0))
                     .frame(width: 24, height: 24)
@@ -125,7 +125,7 @@ struct ProjectsPage: View {
                         Text(a.path.replacingOccurrences(of: (project as NSString).abbreviatingWithTildeInPath + "/", with: ""))
                             .font(.system(size: 12.5, design: .monospaced)).foregroundStyle(Theme.secondaryText).lineLimit(1)
                         Spacer()
-                        Text(a.bytes.bytesText).font(.system(size: 12, design: .monospaced))
+                        Text(a.bytes.bytesText).font(.system(size: 12)).monospacedDigit()
                     }
                     .padding(.leading, 30)
                     .transition(.opacity.combined(with: .move(edge: .top)))

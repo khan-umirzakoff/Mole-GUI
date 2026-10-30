@@ -109,7 +109,7 @@ struct InstallersPage: View {
                             Text("\(file.folder) · \(file.modified.formatted(.relative(presentation: .named)))").caption().lineLimit(1)
                         }
                         Spacer(minLength: 8)
-                        Text(file.bytes.bytesText).font(.system(size: 12, design: .monospaced))
+                        Text(file.bytes.bytesText).font(.system(size: 12)).monospacedDigit()
                             .frame(width: 78, alignment: .trailing)
                     }
                     .contextMenu {

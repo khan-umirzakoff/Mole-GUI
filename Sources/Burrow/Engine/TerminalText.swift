@@ -41,15 +41,9 @@ enum ByteSize {
         return Int64(value * mult)
     }
 
-    /// "1.3 GB"; zero stays a number ("0 KB") so the dotted numerals can draw it.
+    /// "1.3 GB"; zero stays a number ("0 KB") so the dotted numerals can draw it. Always a decimal
+    /// point, whatever the locale: it matches Mole's figures, and a dotted "11,27" reads like a clock.
     static func format(_ bytes: Int64) -> String {
-        formatter.string(fromByteCount: bytes)
+        bytes.formatted(.byteCount(style: .decimal, spellsOutZero: false).locale(Locale(identifier: "en_US_POSIX")))
     }
-
-    nonisolated(unsafe) private static let formatter: ByteCountFormatter = {
-        let f = ByteCountFormatter()
-        f.countStyle = .decimal
-        f.allowsNonnumericFormatting = false
-        return f
-    }()
 }

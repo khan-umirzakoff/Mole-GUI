@@ -149,7 +149,7 @@ struct OptimizePage: View {
                 }
                 HStack(spacing: 8) {
                     Image(systemName: "eye")
-                    Text("Preview. Mole words each step as done, but nothing has run until you press Optimize.")
+                    Text("Preview: these steps run when you press Optimize.")
                 }
                 .font(.system(size: 12.5, weight: .medium)).foregroundStyle(.white.opacity(0.85))
                 .padding(.horizontal, 14).frame(height: 32)

@@ -263,14 +263,21 @@ struct ReportRow: View {
             Spacer()
             switch item.kind {
             case .action:
-                if let b = item.bytes, b > 0 { Text(b.bytesText).font(.system(size: 12.5, design: .monospaced)) }
+                if let b = item.bytes, b > 0 { Text(b.bytesText).font(.system(size: 12.5)).monospacedDigit() }
             case .info: Tag(text: "Manual", color: Glow.blue.color).help("Mole lists this but leaves it to you")
+            case .skipped where needsDiskAccess:
+                Button("Open Settings") { NSWorkspace.shared.open(Self.fullDiskAccess) }
+                    .buttonStyle(.link).font(.system(size: 12, weight: .medium))
+                    .help("Privacy & Security → Full Disk Access: turn on Burrow, then scan again")
             case .skipped: Tag(text: "Skipped", color: .orange)
             case .ok: EmptyView()
             }
         }
         .accessibilityElement(children: .combine)
     }
+
+    private static let fullDiskAccess = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!
+    private var needsDiskAccess: Bool { item.detail.contains("Full Disk Access") }
 
     private var dotColor: Color {
         switch item.kind {
@@ -284,7 +291,12 @@ struct ReportRow: View {
     /// The size is already shown on the right; keep the rest of Mole's detail.
     private var cleanDetail: String {
         // Mole speaks to terminal users; here the app is the one that needs the access.
-        let detail = item.detail.replacingOccurrences(of: "to your terminal", with: "to Burrow")
+        var detail = item.detail.replacingOccurrences(of: "to your terminal", with: "to Burrow")
+        // "skipped, grant…": the tag on the right already says skipped.
+        if item.kind == .skipped, detail.hasPrefix("skipped, ") {
+            detail = String(detail.dropFirst("skipped, ".count))
+            detail = detail.prefix(1).uppercased() + detail.dropFirst()
+        }
         guard item.kind == .action, let b = item.bytes, b > 0 else { return detail }
         return detail.components(separatedBy: ", ").filter { ByteSize.first(in: $0) == nil }.joined(separator: ", ")
     }
@@ -360,8 +372,8 @@ struct SelectTile<Content: View>: View {
     var body: some View {
         Button(action: toggle) {
             HStack(spacing: 12) {
-                content
-                Spacer(minLength: 0)
+                // One flexible region, so a trailing column inside `content` lines up across tiles.
+                HStack(spacing: 12) { content }.frame(maxWidth: .infinity, alignment: .leading)
                 CheckDot(on: selected)
             }
             .padding(12)

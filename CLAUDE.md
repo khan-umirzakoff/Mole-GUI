@@ -33,7 +33,9 @@ folders or memories.
 `build/Burrow.app/Contents/MacOS/Burrow -startPage <page> -snapshot <file.png> [-snapshotDelay 12]
 [-snapshotSize 1080x700]` draws the window offscreen and quits; it works while the screen is locked.
 Pages: overview, clean, uninstall, optimize, analyze, projects, installers, slim, history, settings.
-`swift test` must run outside the sandbox; after a sandboxed run, `rm -rf .build` first.
+`swift test` must run outside the sandbox; after a sandboxed run, `rm -rf .build` first. Since the
+macOS 27.2 Command Line Tools the Testing macro plugin is not found by default: run
+`swift test -Xswiftc -plugin-path -Xswiftc /Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing`.
 
 ## Design bar
 Dark, premium, few large elements: squircle cards lit by one hue (rim or inner glow), dot-matrix
