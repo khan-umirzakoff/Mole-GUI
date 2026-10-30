@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct HistoryPage: View {
-    @ViewState private var history: HistoryResult?
+    /// The last history read, so a return visit shows it at once while it is read again.
+    private static var last: HistoryResult?
+    @ViewState private var history: HistoryResult? = HistoryPage.last
     @ViewState private var loading = true
     @ViewState private var error: String?
     /// Previews (dry runs) are what Burrow runs on every visit; real changes are what matter here.
@@ -92,6 +94,7 @@ struct HistoryPage: View {
         loading = true
         do {
             history = try await Mole.json(HistoryResult.self, ["history", "--json", "--limit", "200"])
+            Self.last = history
             error = nil
         } catch {
             self.error = error.localizedDescription

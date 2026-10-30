@@ -42,7 +42,7 @@ final class StatusMonitor: ObservableObject {
 
 struct OverviewPage: View {
     @EnvironmentObject private var model: AppModel
-    @StateObject private var monitor = StatusMonitor()
+    @ObservedObject var monitor: StatusMonitor
 
     var body: some View {
         let s = monitor.status

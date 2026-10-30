@@ -86,6 +86,9 @@ final class AppModel: ObservableObject {
     let apps = AppCatalog()
     let diskMap = DiskMap()
     let installers = InstallerStore()
+    let leftovers = LeftoverStore()
+    /// Lives here, not on the page, so the last numbers are on screen at once on every visit.
+    let status = StatusMonitor()
 
     init() {
         clean.onBusyChange = { [weak self] in self?.mark(.clean, $0) }
@@ -93,10 +96,24 @@ final class AppModel: ObservableObject {
         purge.onBusyChange = { [weak self] in self?.mark(.projects, $0) }
         slim.onBusyChange = { [weak self] in self?.mark(.slim, $0) }
         installers.onBusyChange = { [weak self] in self?.mark(.installers, $0) }
+        leftovers.onBusyChange = { [weak self] in self?.mark(.uninstall, $0) }
         diskMap.onBusyChange = { [weak self] in self?.mark(.analyze, $0) }
-        // Finding old installers is a quick native walk of a few folders, so the overview can
-        // show a real number at once. Mole's heavy dry runs wait until the user asks.
-        Task { await installers.load() }
+        // Last results come from the cache at once. In the background, one at a time so the Mac
+        // stays responsive, anything missing or older than a few hours is checked again; pages
+        // never re-scan on their own, the Rescan buttons do.
+        Task {
+            await installers.load()
+            await leftovers.load()
+            // Review snapshots and the demo tour show what is cached; they never start Mole.
+            guard UserDefaults.standard.string(forKey: "snapshot") == nil,
+                  UserDefaults.standard.string(forKey: "tour") == nil else { return }
+            await clean.refreshIfStale()
+            await apps.refreshIfStale()
+            await purge.refreshIfStale()
+            await slim.refreshIfStale()
+            await optimize.refreshIfStale()
+            await diskMap.refreshIfStale()
+        }
     }
 
     private func mark(_ page: Page, _ on: Bool) {

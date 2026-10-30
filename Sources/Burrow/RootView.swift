@@ -46,9 +46,9 @@ struct RootView: View {
 
     @ViewBuilder private var content: some View {
         switch model.page {
-        case .overview: OverviewPage()
+        case .overview: OverviewPage(monitor: model.status)
         case .clean: CleanPage(scan: model.clean)
-        case .uninstall: UninstallPage(catalog: model.apps)
+        case .uninstall: UninstallPage(catalog: model.apps, leftovers: model.leftovers)
         case .optimize: OptimizePage(scan: model.optimize)
         case .analyze: AnalyzePage(map: model.diskMap)
         case .projects: ProjectsPage(scan: model.purge)

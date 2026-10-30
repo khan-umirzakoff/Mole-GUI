@@ -26,7 +26,7 @@ struct ProjectsPage: View {
                      detail: "node_modules, .next, dist, target, .venv and other folders a reinstall or build brings back.",
                      scanning: scan.scanning || removing,
                      progress: removing ? "Moving folders to the Trash…" : scan.status.isEmpty ? "" : "Looking in \(scan.status)",
-                     started: scan.startedAt, error: scan.error) {
+                     started: scan.startedAt, checked: scan.finishedAt, error: scan.error) {
                 ScanButton(scanning: scan.scanning, start: rescan, stop: scan.cancel).disabled(removing)
                 Button { model.page = .settings } label: { Label("Scan folders", systemImage: "folder.badge.gearshape") }
                     .buttonStyle(.pillSecondary)

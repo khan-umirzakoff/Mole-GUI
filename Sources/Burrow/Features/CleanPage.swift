@@ -14,7 +14,7 @@ struct CleanPage: View {
                      bytes: scan.scanning ? report?.bytes : report?.total,
                      atLeast: !scan.scanning && (report?.potentialIsLowerBound ?? false),
                      detail: detail,
-                     scanning: scan.scanning, progress: progress, started: scan.startedAt, error: scan.error) {
+                     scanning: scan.scanning, progress: progress, started: scan.startedAt, checked: scan.finishedAt, error: scan.error) {
                 ScanButton(scanning: scan.scanning, start: scan.start, stop: scan.cancel)
                 Button("Clean now") { askToClean() }
                     .buttonStyle(.pill)

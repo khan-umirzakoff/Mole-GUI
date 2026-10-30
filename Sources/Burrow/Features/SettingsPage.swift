@@ -38,8 +38,10 @@ struct SettingsPage: View {
     @EnvironmentObject private var model: AppModel
     @ViewState private var whitelist: [String] = []
     @ViewState private var purgePaths: [String] = []
+    /// The last known state, so a return visit does not show a spinner while it is checked again.
+    private static var knownTouchID: Bool?
     /// nil while checking.
-    @ViewState private var touchID: Bool?
+    @ViewState private var touchID: Bool? = SettingsPage.knownTouchID
     @ViewState private var confirm: ConfirmAction?
 
     var body: some View {
@@ -73,7 +75,10 @@ struct SettingsPage: View {
                         Spacer(minLength: 0)
                         if let on = touchID {
                             Button(on ? "Turn off" : "Turn on") {
-                                model.run("Touch ID for sudo", ["touchid", on ? "disable" : "enable"]) { Task { await checkTouchID() } }
+                                model.run("Touch ID for sudo", ["touchid", on ? "disable" : "enable"]) {
+                                    touchID = nil
+                                    Task { await checkTouchID() }
+                                }
                             }
                             .buttonStyle(on ? .pillSecondary : .pill)
                         }
@@ -119,9 +124,9 @@ struct SettingsPage: View {
     }
 
     private func checkTouchID() async {
-        touchID = nil
         let out = String(decoding: (try? await Mole.capture(["touchid", "status"])) ?? Data(), as: UTF8.self)
         touchID = out.contains("is enabled")
+        Self.knownTouchID = touchID
     }
 
     private func askToRemoveApp() {

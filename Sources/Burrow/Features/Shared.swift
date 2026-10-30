@@ -1,5 +1,31 @@
 import SwiftUI
 
+/// The last result of each scan, kept between launches in Burrow's own cache folder (the
+/// app's uninstaller removes it). Pages show it at once; a scan runs again only when the user
+/// asks or, in the background at launch, when the result is older than `staleAfter`.
+enum ResultCache {
+    static let staleAfter: TimeInterval = 6 * 3600
+    static let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent(Bundle.main.bundleIdentifier ?? "uz.khan.burrow")
+
+    static func save(_ data: Data, as key: String) {
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? data.write(to: folder.appendingPathComponent(key), options: .atomic)
+    }
+
+    /// The saved output and when it was saved.
+    static func load(_ key: String) -> (data: Data, date: Date)? {
+        let url = folder.appendingPathComponent(key)
+        guard let data = try? Data(contentsOf: url),
+              let date = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate else { return nil }
+        return (data, date)
+    }
+
+    static func isStale(_ date: Date?) -> Bool {
+        date.map { Date().timeIntervalSince($0) > staleAfter } ?? true
+    }
+}
+
 /// Runs a Mole dry run with pipes and keeps the parsed result. The run belongs to the app,
 /// not to a page: leaving the page does not stop it, and the result is there on return.
 @MainActor
@@ -17,6 +43,7 @@ final class Scan<Report>: ObservableObject {
     var onBusyChange: ((Bool) -> Void)?
 
     private let args: [String]
+    private let cacheKey: String
     private let parse: (String) -> Report
     private let progressFile: URL?
     private var task: Task<Void, Never>?
@@ -28,6 +55,11 @@ final class Scan<Report>: ObservableObject {
         self.args = args
         self.progressFile = progressFile
         self.parse = parse
+        cacheKey = args.joined(separator: " ")
+        if let saved = ResultCache.load(cacheKey) {
+            report = parse(String(decoding: saved.data, as: UTF8.self))
+            finishedAt = saved.date
+        }
     }
 
     /// The newest result: the finished report, or what the running scan found so far.
@@ -38,6 +70,13 @@ final class Scan<Report>: ObservableObject {
     func start() {
         guard task == nil else { return }
         task = Task { await perform(); task = nil }
+    }
+
+    /// Scans again when there is no result yet or it is old; returns once the scan is done.
+    func refreshIfStale() async {
+        guard task != nil || ResultCache.isStale(finishedAt) else { return }
+        start()
+        await task?.value
     }
 
     /// Stops a running scan and keeps the previous result.
@@ -69,6 +108,7 @@ final class Scan<Report>: ObservableObject {
             let data = try await Mole.capture(args) { [weak self] line in self?.ingest(line) }
             report = parse(String(decoding: data, as: UTF8.self))
             finishedAt = Date()
+            ResultCache.save(data, as: cacheKey)
         } catch {
             // A stopped scan is not an error; the last good result stays.
             if !Task.isCancelled { self.error = error.localizedDescription }
@@ -122,6 +162,8 @@ struct HeroCard<Actions: View>: View {
     var scanning = false
     var progress = ""
     var started = Date()
+    /// When the result on screen was found; it may come from an earlier launch.
+    var checked: Date?
     var error: String?
     @ViewBuilder var actions: Actions
 
@@ -132,7 +174,11 @@ struct HeroCard<Actions: View>: View {
                 HStack {
                     Text(label).cardTitle()
                     Spacer()
-                    if scanning { ScanningBadge(started: started).transition(.blurFade) }
+                    if scanning {
+                        ScanningBadge(started: started).transition(.blurFade)
+                    } else if let checked {
+                        Text("Checked \(checked.formatted(.relative(presentation: .named)))").caption().transition(.blurFade)
+                    }
                 }
                 .frame(height: 28)
                 HStack(alignment: .bottom, spacing: 16) {

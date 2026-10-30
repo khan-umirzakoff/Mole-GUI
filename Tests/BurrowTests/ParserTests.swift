@@ -251,3 +251,34 @@ struct SettingsTests {
         #expect(s[1].looksInterrupted)
     }
 }
+
+struct LeftoverTests {
+    @Test func bundleIDsFromLibraryNames() {
+        #expect(LeftoverScanner.bundleID(fromEntry: "com.tinyspeck.slackmacgap") == "com.tinyspeck.slackmacgap")
+        #expect(LeftoverScanner.bundleID(fromEntry: "com.foo.Bar.savedState") == "com.foo.Bar")
+        #expect(LeftoverScanner.bundleID(fromEntry: "com.foo.Bar.plist") == "com.foo.Bar")
+        #expect(LeftoverScanner.bundleID(fromEntry: "Slack") == nil)
+        #expect(LeftoverScanner.bundleID(fromEntry: "com.foo") == nil)
+        #expect(LeftoverScanner.bundleID(fromEntry: "Google.Chrome.x") == nil)
+        #expect(LeftoverScanner.bundleID(fromEntry: "com.foo..bar") == nil)
+        #expect(LeftoverScanner.bundleID(fromEntry: "com.foo bar.baz") == nil)
+    }
+
+    @Test func installedVendorsAndProtectedNamesStay() {
+        let installed: Set<String> = ["com.google.chrome", "com.tinyspeck.slackmacgap"]
+        #expect(LeftoverScanner.inUse("com.tinyspeck.slackmacgap", installed: installed))
+        #expect(LeftoverScanner.inUse("com.google.Keystone.Agent", installed: installed))
+        #expect(LeftoverScanner.inUse("com.apple.Safari", installed: []))
+        #expect(LeftoverScanner.inUse("com.agilebits.onepassword7", installed: []))
+        #expect(LeftoverScanner.inUse("org.cups.PrintingPrefs", installed: []))
+        #expect(!LeftoverScanner.inUse("com.spotify.client", installed: installed))
+        // A vendor prefix must match whole parts: com.googlex is not Google.
+        #expect(!LeftoverScanner.inUse("com.googlex.app", installed: installed))
+    }
+
+    @Test func staleness() {
+        #expect(ResultCache.isStale(nil))
+        #expect(!ResultCache.isStale(Date()))
+        #expect(ResultCache.isStale(Date().addingTimeInterval(-ResultCache.staleAfter - 1)))
+    }
+}

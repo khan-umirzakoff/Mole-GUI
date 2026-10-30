@@ -148,7 +148,10 @@ enum Mole {
     }
 
     static func json<T: Decodable>(_ type: T.Type, _ args: [String]) async throws -> T {
-        let data = try await capture(args)
+        try decode(T.self, from: try await capture(args))
+    }
+
+    static func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
         // Mole may print a banner before the JSON; decode from the first brace or bracket.
         let start = data.firstIndex(where: { $0 == UInt8(ascii: "{") || $0 == UInt8(ascii: "[") }) ?? data.startIndex
         return try JSONDecoder().decode(T.self, from: data[start...])
