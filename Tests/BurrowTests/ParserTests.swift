@@ -357,4 +357,27 @@ struct LeftoverTests {
         #expect(clean.steps[1].detail == "12 items, 1.20GB" && clean.steps[2].bytes == nil)
         #expect(clean.freed == 1_500_000_000)
     }
+
+    @Test func purgeKeepsResultsWhenSomeFoldersCouldNotBeChecked() {
+        // Mole exits 1 here, after a whole summary; the warnings come on stderr, after stdout.
+        let out = """
+            → [DRY RUN] ~/PROJECTS/app/node_modules, 1.20GB
+            → [DRY RUN] ~/PROJECTS/site/dist, 3.5MB
+            ======================================================================
+            Dry run incomplete - no changes made
+            Would free approximately: 1.20GB | Items: 2 | Free: 81.00GB
+            ======================================================================
+
+            ◎ Could not inspect ~/PROJECTS/a/dist; kept
+            ◎ Could not inspect ~/PROJECTS/b/dist; kept
+            ◎ Could not inspect ~/PROJECTS/c/dist; kept
+            ◎ Could not inspect ~/PROJECTS/d/dist; kept
+            """
+        let r = PurgeReport.parse(out)
+        #expect(r.complete && r.artifacts.count == 2)
+        #expect(r.uninspected == ["~/PROJECTS/a/dist", "~/PROJECTS/b/dist", "~/PROJECTS/c/dist", "~/PROJECTS/d/dist"])
+        #expect(r.notes.last?.hasSuffix("~/PROJECTS/c/dist and 1 more") == true)
+        // Cut off before the summary: not a whole result.
+        #expect(!PurgeReport.parse("→ [DRY RUN] ~/PROJECTS/app/node_modules, 1.20GB").complete)
+    }
 }

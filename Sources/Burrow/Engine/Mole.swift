@@ -5,6 +5,8 @@ import Darwin
 struct MoleError: LocalizedError {
     let code: Int32
     let message: String
+    /// What Mole printed before it stopped: stdout, then stderr.
+    var output = Data()
 
     var errorDescription: String? {
         message.isEmpty ? "Mole stopped with code \(code)." : message
@@ -150,7 +152,8 @@ enum Mole {
                 } else {
                     let code = p.terminationReason == .uncaughtSignal ? 128 + p.terminationStatus : p.terminationStatus
                     let text = String(decoding: errData.isEmpty ? all : errData, as: UTF8.self)
-                    cont.resume(throwing: MoleError(code: code, message: TerminalText.lines(text).last ?? ""))
+                    cont.resume(throwing: MoleError(code: code, message: TerminalText.lines(text).last ?? "",
+                                                    output: all + Data("\n".utf8) + errData))
                 }
             }
         }

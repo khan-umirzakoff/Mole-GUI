@@ -137,9 +137,19 @@ struct PurgeReport {
     var notes: [String] = []
     /// Scan roots Mole could not finish ("~", "~/PROJECTS/Big"), listed under its warning.
     var skippedRoots: [String] = []
+    /// Build folders Mole could not check (for example in a git worktree whose repository is gone); it keeps them.
+    var uninspected: [String] = []
+    /// Mole reached its closing summary, so the list is whole even if it exited 1.
+    var complete = false
     var bytes: Int64 { artifacts.map(\.bytes).reduce(0, +) }
 
     private static let skippedRoot = try! NSRegularExpression(pattern: "^(.+) \\(status [0-9]+\\)$")
+
+    /// "◎ Could not inspect ~/a/dist; kept" → "~/a/dist".
+    private static func uninspectedPath(_ line: String) -> String? {
+        let path = line.dropFirst("◎ Could not inspect ".count).dropLast("; kept".count)
+        return path.isEmpty ? nil : String(path)
+    }
 
     static func parse(_ output: String) -> PurgeReport {
         var report = PurgeReport()
@@ -154,7 +164,11 @@ struct PurgeReport {
                 if line.hasPrefix("and "), line.hasSuffix(" more") { continue }
                 inSkipped = false
             }
-            if line.hasPrefix("◎ Skipped") {
+            if line.hasPrefix("◎ Could not inspect "), line.hasSuffix("; kept") {
+                uninspectedPath(line).map { report.uninspected.append($0) }
+            } else if line.hasPrefix("Dry run incomplete") || line.hasPrefix("Dry run complete") {
+                report.complete = true
+            } else if line.hasPrefix("◎ Skipped") {
                 // The heading ends with a colon; the roots follow on their own lines.
                 var note = String(line.dropFirst()).trimmingCharacters(in: .whitespaces)
                 if note.hasSuffix(":") { note.removeLast() }
@@ -172,6 +186,12 @@ struct PurgeReport {
         report.artifacts.sort { $0.bytes > $1.bytes }
         if !report.skippedRoots.isEmpty, let i = report.notes.firstIndex(where: { $0.hasPrefix("Skipped") }) {
             report.notes[i] += ": " + report.skippedRoots.joined(separator: ", ")
+        }
+        if !report.uninspected.isEmpty {
+            let n = report.uninspected.count
+            report.notes.append("Mole could not check \(n == 1 ? "this build folder" : "\(n) build folders"), so it keeps "
+                                + "\(n == 1 ? "it" : "them"): " + report.uninspected.prefix(3).joined(separator: ", ")
+                                + (n > 3 ? " and \(n - 3) more" : ""))
         }
         return report
     }

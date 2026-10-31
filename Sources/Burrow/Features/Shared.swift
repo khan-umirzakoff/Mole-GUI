@@ -58,16 +58,20 @@ final class Scan<Report>: ObservableObject {
     private let cacheKey: String
 
     private let parse: (String) -> Report
+    /// Whether a run that exited 1 still printed a whole result (purge: "Dry run incomplete").
+    private let usableAfterFailure: ((Report) -> Bool)?
     private let progressFile: URL?
     private var task: Task<Void, Never>?
     private var buffer = ""
     private var lastParse = Date.distantPast
 
     /// `progressFile` is a file Mole rewrites with the path it is scanning (read only).
-    init(_ args: [String], progressFile: URL? = nil, parse: @escaping (String) -> Report) {
+    init(_ args: [String], progressFile: URL? = nil, usableAfterFailure: ((Report) -> Bool)? = nil,
+         parse: @escaping (String) -> Report) {
         self.args = args
         self.progressFile = progressFile
         self.parse = parse
+        self.usableAfterFailure = usableAfterFailure
         cacheKey = args.joined(separator: " ")
         if let saved = ResultCache.load(cacheKey) {
             report = parse(String(decoding: saved.data, as: UTF8.self))
@@ -127,6 +131,16 @@ final class Scan<Report>: ObservableObject {
             report = parse(String(decoding: data, as: UTF8.self))
             finishedAt = Date()
             ResultCache.save(data, as: cacheKey)
+        } catch let failure as MoleError where failure.code == 1 && !Task.isCancelled {
+            // Mole finished but could not check everything: keep what it found, its warnings included.
+            let partial = parse(String(decoding: failure.output, as: UTF8.self))
+            if usableAfterFailure?(partial) == true {
+                report = partial
+                finishedAt = Date()
+                ResultCache.save(failure.output, as: cacheKey)
+            } else {
+                self.error = failure.localizedDescription
+            }
         } catch {
             // A stopped scan is not an error; the last good result stays.
             if !Task.isCancelled { self.error = error.localizedDescription }

@@ -81,7 +81,7 @@ final class AppModel: ObservableObject {
     /// Mole rewrites this file with the folder it is scanning; Burrow only reads it.
     let purge = Scan(["purge", "--dry-run"],
                      progressFile: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".cache/mole/purge_scanning"),
-                     parse: PurgeReport.parse)
+                     usableAfterFailure: { $0.complete }, parse: PurgeReport.parse)
     let slim = Scan(["slim", "--dry-run"], parse: SlimReport.parse)
     let apps = AppCatalog()
     let diskMap = DiskMap()
