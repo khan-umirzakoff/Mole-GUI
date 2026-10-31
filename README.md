@@ -74,13 +74,20 @@ re-scans whenever you want.
 
 ## Install
 
-Download `Burrow.dmg` from [Releases](../../releases), open it and drag Burrow to Applications.
-The app is ad-hoc signed (not notarized), so macOS blocks the first launch: open
-**System Settings → Privacy & Security** and press **Open Anyway** next to Burrow, or run:
+Burrow is ad-hoc signed (not notarized), so macOS stops it twice: once when you open the DMG
+("Burrow.dmg Not Opened") and once on the app's first launch. Each time press **Done**, then open
+**System Settings → Privacy & Security** and press **Open Anyway**. Or skip both dialogs from Terminal:
 
-```bash
-xattr -dr com.apple.quarantine /Applications/Burrow.app
-```
+1. Download `Burrow.dmg` from [Releases](../../releases) and unblock it:
+   ```bash
+   xattr -d com.apple.quarantine ~/Downloads/Burrow.dmg
+   ```
+2. Open it and drag Burrow to Applications, then unblock the app:
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/Burrow.app
+   ```
+
+Updates after that install without these steps.
 
 Requires macOS 26 or later on Apple silicon.
 
