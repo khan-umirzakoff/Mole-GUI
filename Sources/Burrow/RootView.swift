@@ -78,7 +78,7 @@ struct Sidebar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 10) {
-                BurrowMark().frame(width: 28, height: 28)
+                BurrowMark().frame(width: 36, height: 36).padding(-4)
                 Text("Burrow").font(.system(size: 17, weight: .semibold))
             }
             .padding(.leading, 10)
@@ -147,13 +147,10 @@ private struct SidebarItem: View {
     }
 }
 
-/// The app mark: a glowing orb with a dotted burrow below.
+/// The app mark in the sidebar.
 struct BurrowMark: View {
     var body: some View {
-        ZStack {
-            Circle().fill(RadialGradient(colors: [Glow.magenta.color, Glow.violet.color, Glow.blue.color.opacity(0.4)],
-                                         center: .init(x: 0.35, y: 0.3), startRadius: 1, endRadius: 18))
-            Circle().strokeBorder(.white.opacity(0.35), lineWidth: 1)
-        }
+        // The app icon itself, so the window, the Dock and Finder show one mark.
+        Image(nsImage: NSApp.applicationIconImage).resizable().interpolation(.high)
     }
 }

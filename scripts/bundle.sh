@@ -15,6 +15,8 @@ BIN="$(swift build -c release --arch arm64 --show-bin-path)/Burrow"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Burrow"
+mkdir -p "$APP/Contents/Frameworks"
+ditto "$(dirname "$BIN")/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
 cp -R Vendor/mole "$APP/Contents/Resources/mole"
 cp LICENSE "$APP/Contents/Resources/LICENSE"
 
@@ -22,11 +24,14 @@ cp LICENSE "$APP/Contents/Resources/LICENSE"
 ICONSET="$(mktemp -d)/Burrow.iconset"
 mkdir -p "$ICONSET"
 swift scripts/make-icon.swift "$ICONSET/icon_1024.png"
+swift scripts/make-icon.swift "$ICONSET/small_1024.png" small   # fewer rings for 16 and 32 px
 for s in 16 32 128 256 512; do
-    sips -z $s $s "$ICONSET/icon_1024.png" --out "$ICONSET/icon_${s}x${s}.png" > /dev/null
-    sips -z $((s * 2)) $((s * 2)) "$ICONSET/icon_1024.png" --out "$ICONSET/icon_${s}x${s}@2x.png" > /dev/null
+    src="$ICONSET/icon_1024.png"; [ $s -le 32 ] && src="$ICONSET/small_1024.png"
+    sips -z $s $s "$src" --out "$ICONSET/icon_${s}x${s}.png" > /dev/null
+    src="$ICONSET/icon_1024.png"; [ $s -eq 16 ] && src="$ICONSET/small_1024.png"
+    sips -z $((s * 2)) $((s * 2)) "$src" --out "$ICONSET/icon_${s}x${s}@2x.png" > /dev/null
 done
-rm "$ICONSET/icon_1024.png"
+rm "$ICONSET/icon_1024.png" "$ICONSET/small_1024.png"
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/Burrow.icns"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
@@ -47,6 +52,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSHumanReadableCopyright</key><string>GPL-3.0. Engine: Mole by tw93.</string>
+    <key>SUFeedURL</key><string>https://github.com/khan-umirzakoff/Mole-GUI/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key><string>QaDnpjb2kiIdqemydO9gyCCnyPQdQ2TuRqXxdx4cNjU=</string>
+    <key>SUEnableAutomaticChecks</key><true/>
+    <key>SUAutomaticallyUpdate</key><true/>
 </dict>
 </plist>
 PLIST

@@ -58,6 +58,9 @@ struct GlowCard<Content: View>: View {
 struct GlowSurface: View {
     let glow: Glow
     let style: GlowStyle
+    /// The light fills in once when the card appears (a page visit, a new panel), then holds
+    /// still: a one-off animation, so nothing redraws while the window idles.
+    @ViewState private var lit = Motion.reduced
 
     var body: some View {
         GeometryReader { geo in
@@ -66,21 +69,29 @@ struct GlowSurface: View {
                 switch style {
                 case .rim:
                     // Coloured edges with a dark, soft core.
-                    glow.color
+                    glow.color.opacity(lit ? 1 : 0.25)
+                    // The dark core starts over the whole card and settles, so the colour creeps in from the edges.
                     RadialGradient(colors: [.black.opacity(0.92), .black.opacity(0.55), .clear],
                                    center: .init(x: 0.5, y: 0.55), startRadius: 0, endRadius: side * 0.55)
                         .blur(radius: 18)
+                        .scaleEffect(lit ? 1 : 2.2, anchor: .init(x: 0.5, y: 0.55))
                 case .core:
                     // Dark card lit from inside.
                     Color(white: 0.06)
                     RadialGradient(colors: [glow.color.opacity(0.95), glow.color.opacity(0.35), .clear],
                                    center: .init(x: 0.62, y: 0.78), startRadius: 0, endRadius: side * 0.62)
                         .blur(radius: 30)
+                        .scaleEffect(lit ? 1 : 0.25, anchor: .init(x: 0.62, y: 0.78))
+                        .opacity(lit ? 1 : 0)
                 case .plain:
                     Color.white.opacity(0.045)
                 }
                 LinearGradient(colors: [.white.opacity(0.10), .clear], startPoint: .top, endPoint: .center)
             }
+        }
+        .onAppear {
+            guard !lit else { return }
+            withAnimation(.easeOut(duration: 1.4).delay(0.08)) { lit = true }
         }
     }
 }

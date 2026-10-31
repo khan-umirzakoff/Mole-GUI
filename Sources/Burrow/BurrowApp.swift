@@ -1,3 +1,4 @@
+import Sparkle
 import SwiftUI
 
 @main
@@ -20,6 +21,9 @@ struct BurrowApp: App {
         .defaultSize(width: 1280, height: 820)
         .commands {
             CommandGroup(replacing: .newItem) {}
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { delegate.updater?.checkForUpdates(nil) }
+            }
             CommandMenu("Go") {
                 ForEach(Page.allCases) { page in
                     Button(page.title) { model.page = page }
@@ -34,6 +38,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var signalSources: [DispatchSourceSignal] = []
     /// Set by the app once its model exists, so quitting can see a running session.
     weak var model: AppModel?
+    /// Sparkle, reading the appcast on the GitHub releases. Only in a bundle that names a feed,
+    /// and never in review snapshots or the demo tour.
+    private(set) var updater: SPUStandardUpdaterController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Started from `swift run` the binary is not an app bundle yet; make it a normal app.
@@ -53,6 +60,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             signalSources.append(source)
         }
         scheduleSnapshot()
+        let defaults = UserDefaults.standard
+        if Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") != nil,
+           defaults.string(forKey: "snapshot") == nil, defaults.string(forKey: "tour") == nil {
+            updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+        }
+        // Opened at login only to watch for deleted apps: no window until the user asks.
+        let event = NSAppleEventManager.shared().currentAppleEvent
+        if RemovalWatcher.enabled, event?.eventID == kAEOpenApplication,
+           event?.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem {
+            DispatchQueue.main.async { NSApp.windows.filter { !($0 is NSPanel) }.forEach { $0.close() } }
+        }
     }
 
     /// `-snapshot <file.png> [-snapshotDelay <seconds>]`: draws the window into a PNG without the
@@ -91,5 +109,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) { Mole.terminateAll() }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    /// While it offers to clean up after deleted apps, Burrow keeps watching from the Dock.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { !RemovalWatcher.enabled }
 }

@@ -56,7 +56,7 @@ enum Page: String, CaseIterable, Identifiable {
         case .installers: "Disk images and packages you no longer need"
         case .slim: "Drop the Intel half of universal apps"
         case .history: "Everything Mole changed, newest first"
-        case .settings: "Protection rules, scan folders, Touch ID"
+        case .settings: "Protection rules, scan folders, Touch ID, deleted apps"
         }
     }
 
@@ -87,6 +87,8 @@ final class AppModel: ObservableObject {
     let diskMap = DiskMap()
     let installers = InstallerStore()
     let leftovers = LeftoverStore()
+    /// Offers the leftovers of an app the moment it is deleted.
+    private(set) lazy var removals = RemovalWatcher(store: leftovers)
     /// Lives here, not on the page, so the last numbers are on screen at once on every visit.
     let status = StatusMonitor()
 
@@ -102,6 +104,9 @@ final class AppModel: ObservableObject {
             await installers.load()
             await leftovers.load()
             await refreshStale()
+        }
+        if UserDefaults.standard.string(forKey: "snapshot") == nil, UserDefaults.standard.string(forKey: "tour") == nil {
+            removals.start()
         }
         // A window left open for days still gets fresh results when the user comes back to it.
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil,
@@ -122,6 +127,7 @@ final class AppModel: ObservableObject {
               UserDefaults.standard.string(forKey: "tour") == nil else { return }
         refreshing = true
         defer { refreshing = false }
+        await leftovers.refreshIfAppsChanged()
         await optimize.refreshIfStale()
         await slim.refreshIfStale()
         await apps.refreshIfStale()

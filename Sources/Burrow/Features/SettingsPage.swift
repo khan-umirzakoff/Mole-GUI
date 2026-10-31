@@ -1,3 +1,4 @@
+import ServiceManagement
 import SwiftUI
 
 /// A line-based Mole config file (`whitelist`, `purge_paths`): comments are kept as they are.
@@ -42,7 +43,8 @@ struct SettingsPage: View {
     private static var knownTouchID: Bool?
     /// nil while checking.
     @ViewState private var touchID: Bool? = SettingsPage.knownTouchID
-    @ViewState private var confirm: ConfirmAction?
+    @AppStorage(RemovalWatcher.enabledKey) private var offerLeftovers = true
+    @ViewState private var openAtLogin = SMAppService.mainApp.status == .enabled
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -105,17 +107,28 @@ struct SettingsPage: View {
             .fixedSize(horizontal: false, vertical: true)
 
             GlowCard(glow: .ember, style: .rim, padding: 22) {
-                HStack {
+                HStack(spacing: 24) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Remove Burrow completely").cardTitle()
-                        Text("Moves the app, its preferences and the files Mole keeps (~/.config/mole, ~/.cache/mole, ~/Library/Logs/mole) to the Trash. If Mole is also installed on its own, its files stay.").caption()
+                        Text("When you delete an app").cardTitle()
+                        Text("Burrow spots the files a deleted app leaves behind and offers to move them to the Trash. To notice in time, it keeps running after you close its window.").caption()
+                            .frame(maxWidth: 520, alignment: .leading)
                     }
                     Spacer()
-                    Button("Remove…") { askToRemoveApp() }.buttonStyle(.pillDanger)
+                    Grid(alignment: .trailing, horizontalSpacing: 12, verticalSpacing: 10) {
+                        GridRow {
+                            Text("Offer to clean up").font(.system(size: 13))
+                            Toggle("Offer to clean up", isOn: $offerLeftovers).labelsHidden()
+                        }
+                        GridRow {
+                            Text("Start Burrow at login").font(.system(size: 13))
+                            Toggle("Start Burrow at login", isOn: Binding(get: { openAtLogin }, set: setOpenAtLogin)).labelsHidden()
+                        }
+                    }
+                    .toggleStyle(.switch).controlSize(.small)
+                    .fixedSize()
                 }
             }
         }
-        .confirmation($confirm)
         .task {
             whitelist = ConfigList.whitelist.read()
             purgePaths = ConfigList.purgePaths.read()
@@ -123,55 +136,15 @@ struct SettingsPage: View {
         }
     }
 
+    private func setOpenAtLogin(_ on: Bool) {
+        try? on ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister()
+        openAtLogin = SMAppService.mainApp.status == .enabled
+    }
+
     private func checkTouchID() async {
         let out = String(decoding: (try? await Mole.capture(["touchid", "status"])) ?? Data(), as: UTF8.self)
         touchID = out.contains("is enabled")
         Self.knownTouchID = touchID
-    }
-
-    private func askToRemoveApp() {
-        let cli = Uninstaller.standaloneMole()
-        confirm = .init(title: "Remove Burrow?",
-                        message: cli.map { "Mole is also installed at \($0), so its protection rules, scan folders, history and logs stay. Burrow and its preferences go to the Trash." }
-                            ?? "Burrow, its preferences and Mole's protection rules, scan folders, history and logs go to the Trash. Files Mole already moved to the Trash stay there.",
-                        button: "Remove") {
-            Uninstaller.removeEverything(keepMoleData: cli != nil)
-        }
-    }
-}
-
-enum Uninstaller {
-    /// A Mole installed outside Burrow (Homebrew, the install script) shares ~/.config/mole.
-    static func standaloneMole() -> String? {
-        let path = ProcessInfo.processInfo.environment["PATH"] ?? ""
-        let dirs = path.split(separator: ":").map(String.init)
-            + ["/opt/homebrew/bin", "/usr/local/bin", ConfigList.home(".local/bin").path]
-        for dir in dirs {
-            for name in ["mo", "mole"] {
-                let candidate = (dir as NSString).appendingPathComponent(name)
-                if FileManager.default.isExecutableFile(atPath: candidate),
-                   !candidate.hasPrefix(Bundle.main.bundlePath) { return candidate }
-            }
-        }
-        return nil
-    }
-
-    /// Moves Burrow's (and, unless another Mole shares them, Mole's) files to the Trash, then
-    /// trashes the bundle and quits. The Trash keeps it all recoverable.
-    static func removeEverything(keepMoleData: Bool) {
-        let fm = FileManager.default
-        let id = Bundle.main.bundleIdentifier ?? "uz.khan.burrow"
-        var paths = ["Library/Saved Application State/\(id).savedState", "Library/Preferences/\(id).plist",
-                     "Library/Caches/\(id)", "Library/HTTPStorages/\(id)"]
-        if !keepMoleData { paths += [".config/mole", ".cache/mole", "Library/Logs/mole"] }
-        UserDefaults.standard.removePersistentDomain(forName: id)
-        for path in paths where fm.fileExists(atPath: ConfigList.home(path).path) {
-            try? fm.trashItem(at: ConfigList.home(path), resultingItemURL: nil)
-        }
-        if Bundle.main.bundleURL.pathExtension == "app" {
-            try? fm.trashItem(at: Bundle.main.bundleURL, resultingItemURL: nil)
-        }
-        NSApp.terminate(nil)
     }
 }
 

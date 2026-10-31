@@ -1,74 +1,114 @@
-// Draws the app icon (a glowing orb on a dark, dotted squircle) as a 1024px PNG.
-// Usage: swift scripts/make-icon.swift <output.png>
+// Draws the app icon as a 1024px PNG: the mouth of a burrow, rings stepping down into the dark,
+// lit from inside, on Apple's icon grid (824pt body, continuous corners).
+// Usage: swift scripts/make-icon.swift <output.png> [small]
+// `small` draws the 16 and 32 px variant: fewer, wider rings that still read at that size.
 import AppKit
+import SwiftUI
 
+let small = CommandLine.arguments.count > 2 && CommandLine.arguments[2] == "small"
 let size: CGFloat = 1024
-let image = NSImage(size: NSSize(width: size, height: size))
-image.lockFocus()
+let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size), pixelsHigh: Int(size), bitsPerSample: 8,
+                           samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                           bytesPerRow: 0, bitsPerPixel: 0)!
+NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
 let ctx = NSGraphicsContext.current!.cgContext
 let space = CGColorSpaceCreateDeviceRGB()
 
-// Squircle body with the macOS icon margin.
-let inset: CGFloat = 100
-let body = CGRect(x: inset, y: inset, width: size - inset * 2, height: size - inset * 2)
-let shape = CGPath(roundedRect: body, cornerWidth: 185, cornerHeight: 185, transform: nil)
-ctx.addPath(shape)
-ctx.clip()
-ctx.setFillColor(CGColor(red: 0.03, green: 0.03, blue: 0.05, alpha: 1))
-ctx.fill(body)
-
-func glow(_ center: CGPoint, _ radius: CGFloat, _ colors: [CGColor]) {
-    let g = CGGradient(colorsSpace: space, colors: colors as CFArray, locations: nil)!
-    ctx.drawRadialGradient(g, startCenter: center, startRadius: 0, endCenter: center, endRadius: radius, options: [])
+func rgb(_ hex: UInt32, _ a: CGFloat = 1) -> CGColor {
+    CGColor(red: CGFloat(hex >> 16 & 0xff) / 255, green: CGFloat(hex >> 8 & 0xff) / 255, blue: CGFloat(hex & 0xff) / 255, alpha: a)
+}
+func gradient(_ colors: [CGColor], _ locations: [CGFloat]? = nil) -> CGGradient {
+    CGGradient(colorsSpace: space, colors: colors as CFArray, locations: locations)!
 }
 
-// Ambient colour from the lower right, like the cards.
-glow(CGPoint(x: 700, y: 260), 520, [CGColor(red: 0.25, green: 0.38, blue: 1, alpha: 0.9), CGColor(red: 0.25, green: 0.38, blue: 1, alpha: 0)])
-glow(CGPoint(x: 300, y: 780), 420, [CGColor(red: 0.86, green: 0.27, blue: 0.62, alpha: 0.55), CGColor(red: 0.86, green: 0.27, blue: 0.62, alpha: 0)])
+let body = CGRect(x: 100, y: 100, width: 824, height: 824)
+let shape = RoundedRectangle(cornerRadius: 185.4, style: .continuous).path(in: body).cgPath
 
-// Dot grid.
-ctx.setFillColor(CGColor(gray: 1, alpha: 0.10))
-var y = body.minY + 24
-while y < body.maxY {
-    var x = body.minX + 24
-    while x < body.maxX { ctx.fillEllipse(in: CGRect(x: x, y: y, width: 7, height: 7)); x += 40 }
-    y += 40
-}
-
-// The orb.
-let orb = CGPoint(x: 512, y: 540)
-glow(orb, 300, [CGColor(red: 0.55, green: 0.38, blue: 0.98, alpha: 0.65), CGColor(red: 0.55, green: 0.38, blue: 0.98, alpha: 0)])
+// Drop shadow under the body, as on the Dock.
 ctx.saveGState()
-ctx.addEllipse(in: CGRect(x: orb.x - 190, y: orb.y - 190, width: 380, height: 380))
-ctx.clip()
-let g = CGGradient(colorsSpace: space, colors: [
-    CGColor(red: 1, green: 0.92, blue: 0.97, alpha: 1),
-    CGColor(red: 0.86, green: 0.27, blue: 0.62, alpha: 1),
-    CGColor(red: 0.42, green: 0.30, blue: 0.95, alpha: 1),
-    CGColor(red: 0.12, green: 0.16, blue: 0.55, alpha: 1),
-] as CFArray, locations: [0, 0.35, 0.7, 1])!
-ctx.drawRadialGradient(g, startCenter: CGPoint(x: orb.x - 70, y: orb.y + 80), startRadius: 0,
-                       endCenter: orb, endRadius: 200, options: [.drawsAfterEndLocation])
-ctx.restoreGState()
-ctx.setStrokeColor(CGColor(gray: 1, alpha: 0.45))
-ctx.setLineWidth(4)
-ctx.strokeEllipse(in: CGRect(x: orb.x - 190, y: orb.y - 190, width: 380, height: 380))
-
-// A dotted "burrow" under the orb.
-ctx.setFillColor(CGColor(red: 0.84, green: 0.96, blue: 0.35, alpha: 1))
-for i in 0..<9 {
-    let x = 352 + CGFloat(i) * 40
-    let dip = sin(CGFloat(i) / 8 * .pi) * 40
-    ctx.fillEllipse(in: CGRect(x: x - 9, y: 250 - dip - 9, width: 18, height: 18))
-}
-
-// Top highlight on the squircle edge.
-ctx.resetClip()
+ctx.setShadow(offset: CGSize(width: 0, height: -12), blur: 30, color: rgb(0x000000, 0.4))
 ctx.addPath(shape)
-ctx.setStrokeColor(CGColor(gray: 1, alpha: 0.16))
-ctx.setLineWidth(5)
-ctx.strokePath()
-image.unlockFocus()
+ctx.setFillColor(rgb(0x0B0C1E))
+ctx.fillPath()
+ctx.restoreGState()
 
-let rep = NSBitmapImageRep(data: image.tiffRepresentation!)!
+ctx.saveGState()
+ctx.addPath(shape)
+ctx.clip()
+// Deep indigo, lighter at the top.
+ctx.drawLinearGradient(gradient([rgb(0x22265E), rgb(0x0E0F2A), rgb(0x080814)], [0, 0.6, 1]),
+                       start: CGPoint(x: 512, y: body.maxY), end: CGPoint(x: 512, y: body.minY), options: [])
+let floor: CGFloat = small ? 200 : 236
+// Light spilling out of the burrow.
+let mouth = CGPoint(x: 512, y: floor + 90)
+ctx.drawRadialGradient(gradient([rgb(0x7B5CFF, 0.6), rgb(0x9A3FC0, 0.18), rgb(0x9A3FC0, 0)], [0, 0.5, 1]),
+                       startCenter: mouth, startRadius: 0, endCenter: mouth, endRadius: 470, options: [])
+
+// The burrow: arches on one floor, each smaller and darker, down to the hole.
+func arch(width w: CGFloat, height h: CGFloat) -> CGPath {
+    let p = CGMutablePath()
+    let r = w / 2
+    p.move(to: CGPoint(x: 512 - r, y: floor))
+    p.addLine(to: CGPoint(x: 512 - r, y: floor + h - r))
+    p.addArc(center: CGPoint(x: 512, y: floor + h - r), radius: r, startAngle: .pi, endAngle: 0, clockwise: true)
+    p.addLine(to: CGPoint(x: 512 + r, y: floor))
+    p.closeSubpath()
+    return p
+}
+let rings: [(w: CGFloat, h: CGFloat, top: UInt32, bottom: UInt32)] = small ? [
+    (640, 600, 0xEFECFF, 0xC4B9FF),
+    (440, 420, 0x8470F0, 0x5038C8),
+] : [
+    (576, 506, 0xEFECFF, 0xC4B9FF),
+    (466, 420, 0xA897FF, 0x8470F0),
+    (364, 340, 0x6C55E8, 0x5038C8),
+    (270, 266, 0x3E2AA8, 0x2A1A7A),
+]
+for (i, ring) in rings.enumerated() {
+    let path = arch(width: ring.w, height: ring.h)
+    ctx.saveGState()
+    // Each ring casts a shadow onto the next one in, which gives the depth.
+    if i > 0 { ctx.setShadow(offset: CGSize(width: 0, height: -10), blur: 28, color: rgb(0x05040F, 0.7)) }
+    ctx.addPath(path)
+    ctx.setFillColor(rgb(ring.bottom))
+    ctx.fillPath()
+    ctx.restoreGState()
+    ctx.saveGState()
+    ctx.addPath(path)
+    ctx.clip()
+    ctx.drawLinearGradient(gradient([rgb(ring.top), rgb(ring.bottom)]),
+                           start: CGPoint(x: 512, y: floor + ring.h), end: CGPoint(x: 512, y: floor), options: [])
+    ctx.restoreGState()
+}
+// The hole: dark, with a warm light deep inside, the brightest point of the icon.
+let hole = small ? arch(width: 250, height: 250) : arch(width: 182, height: 196)
+ctx.saveGState()
+ctx.setShadow(offset: CGSize(width: 0, height: -10), blur: 28, color: rgb(0x000000, 0.7))
+ctx.addPath(hole)
+ctx.setFillColor(rgb(0x07051A))
+ctx.fillPath()
+ctx.restoreGState()
+ctx.saveGState()
+ctx.addPath(hole)
+ctx.clip()
+let core = CGPoint(x: 512, y: floor + 36)
+ctx.drawRadialGradient(gradient([rgb(0xFFB3E0, 1), rgb(0xE05FB8, 0.5), rgb(0xE05FB8, 0)], [0, 0.35, 1]),
+                       startCenter: core, startRadius: 0, endCenter: core, endRadius: small ? 190 : 150, options: [])
+ctx.restoreGState()
+
+if !small {
+    // The ground: a little darker, with a pool of light at the burrow's mouth.
+    ctx.drawLinearGradient(gradient([rgb(0x000000, 0), rgb(0x000000, 0.3)]),
+                           start: CGPoint(x: 512, y: floor), end: CGPoint(x: 512, y: body.minY), options: [])
+    ctx.saveGState()
+    ctx.clip(to: CGRect(x: body.minX, y: body.minY, width: body.width, height: floor - body.minY))
+    ctx.translateBy(x: 512, y: floor - 6)
+    ctx.scaleBy(x: 1, y: 0.18)
+    ctx.drawRadialGradient(gradient([rgb(0xB07CFF, 0.45), rgb(0xB07CFF, 0)]),
+                           startCenter: .zero, startRadius: 0, endCenter: .zero, endRadius: 260, options: [])
+    ctx.restoreGState()
+}
+ctx.restoreGState()
+
+NSGraphicsContext.current = nil
 try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[1]))

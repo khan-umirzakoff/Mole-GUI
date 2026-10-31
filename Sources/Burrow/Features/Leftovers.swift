@@ -144,7 +144,9 @@ enum LeftoverScanner {
         return Set(lines.dropLast())
     }
 
-    nonisolated static func scan() -> [Leftover] {
+    /// `justRemoved`: lowercased ids of apps deleted while Burrow was watching; like an app in
+    /// the Trash, their settings and data count at once.
+    nonisolated static func scan(justRemoved: Set<String> = []) -> [Leftover] {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser
         guard let protected = protectedPatterns() else { return [] }
@@ -157,7 +159,7 @@ enum LeftoverScanner {
             guard let names = try? fm.contentsOfDirectory(atPath: dir.path) else { continue }
             for name in names {
                 guard let id = bundleID(fromEntry: name), !inUse(id, installed: installed) else { continue }
-                let inTrash = trashed[id.lowercased()] != nil
+                let inTrash = trashed[id.lowercased()] != nil || justRemoved.contains(id.lowercased())
                 if kind == .data || kind == .settings, !inTrash { continue }
                 let path = dir.appendingPathComponent(name).path
                 // A link may lead to live data elsewhere; an unreadable date proves nothing.
@@ -240,6 +242,75 @@ final class LeftoverStore: ObservableObject {
     var onBusyChange: ((Bool) -> Void)?
 
     private var loadTask: Task<Void, Never>?
+    private var appsSeen: [String: String]?
+    /// Apps deleted while Burrow watched, confirmed in the Trash: lowercased bundle id → where
+    /// the app was. Cleared again when the app comes back.
+    private(set) var removed: [String: String] = [:]
+
+    /// Apps in the app folders (one vendor folder deep) and the Trash, path → lowercased bundle
+    /// id: when this changes, an app was installed or deleted.
+    nonisolated static func apps() -> [String: String] {
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser.path
+        var out: [String: String] = [:]
+        func add(_ dir: String, nested: Bool) {
+            for name in (try? fm.contentsOfDirectory(atPath: dir)) ?? [] {
+                let path = dir + "/" + name
+                if name.hasSuffix(".app") {
+                    out[path] = Bundle(path: path)?.bundleIdentifier?.lowercased() ?? ""
+                } else if nested, !name.hasPrefix(".") {
+                    add(path, nested: false)
+                }
+            }
+        }
+        add("/Applications", nested: true)
+        add(home + "/Applications", nested: true)
+        add(home + "/.Trash", nested: false)
+        return out
+    }
+
+    /// The first look, taken when watching starts, so a deletion during the launch scan counts.
+    func watchApps() {
+        if appsSeen == nil { appsSeen = Self.apps() }
+    }
+
+    /// Looks again as soon as an app was deleted (or added), so its leftovers show up without
+    /// waiting for a relaunch.
+    func refreshIfAppsChanged() async {
+        guard let seen = appsSeen else { return }
+        let now = await Task.detached { LeftoverStore.apps() }.value
+        guard now != seen else { return }
+        appsSeen = now
+        let stillThere = Set(now.filter { !$0.key.contains("/.Trash/") }.values)
+        removed = removed.filter { !stillThere.contains($0.key) }
+        for (id, path) in Self.removedApps(seen: seen, now: now) where Self.inTrash(id, formerPath: path, now: now) {
+            removed[id] = path
+        }
+        // A scan that started before this change cannot know about it: wait for it, then look again.
+        if loadTask != nil { await load() }
+        await load()
+    }
+
+    /// Apps that left the app folders between two looks (id → where they were). A renamed or
+    /// re-downloaded app still in an app folder does not count.
+    nonisolated static func removedApps(seen: [String: String], now: [String: String]) -> [String: String] {
+        let stillThere = Set(now.filter { !$0.key.contains("/.Trash/") }.values)
+        var out: [String: String] = [:]
+        for (path, id) in seen where now[path] == nil && !id.isEmpty && !path.contains("/.Trash/") && !stillThere.contains(id) {
+            out[id] = path
+        }
+        return out
+    }
+
+    /// Only an app the user put in the Trash counts as deleted: an updater that swaps the bundle
+    /// or a move to another disk leaves a gap, never a copy in the Trash. Listing the Trash needs
+    /// Full Disk Access, so the app's own name there is checked too.
+    nonisolated static func inTrash(_ id: String, formerPath: String, now: [String: String]) -> Bool {
+        if now.contains(where: { $0.key.contains("/.Trash/") && $0.value == id }) { return true }
+        let path = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".Trash")
+            .appendingPathComponent((formerPath as NSString).lastPathComponent).path
+        return Bundle(path: path)?.bundleIdentifier?.lowercased() == id
+    }
 
     /// A second caller (a Rescan during the launch scan, the refresh after trashing) waits for
     /// the scan already running instead of being dropped.
@@ -254,7 +325,8 @@ final class LeftoverStore: ObservableObject {
     private func scan() async {
         scanning = true
         onBusyChange?(true)
-        leftovers = await Task.detached { LeftoverScanner.scan() }.value
+        let removed = Set(removed.keys)
+        leftovers = await Task.detached { LeftoverScanner.scan(justRemoved: removed) }.value
         checkedAt = Date()
         scanning = false
         onBusyChange?(false)
@@ -264,8 +336,9 @@ final class LeftoverStore: ObservableObject {
     /// running apps, LaunchServices, protected paths, age) must still offer each item.
     /// Returns the paths that could not be moved.
     func trash(_ chosen: [Leftover]) async -> [String] {
+        let removed = Set(removed.keys)
         let failed = await Task.detached {
-            let still = Set(LeftoverScanner.scan().flatMap(\.items).map(\.path))
+            let still = Set(LeftoverScanner.scan(justRemoved: removed).flatMap(\.items).map(\.path))
             return Trash.move(chosen.flatMap(\.items).map(\.path).filter(still.contains))
         }.value
         // A scan already running started before the move: wait for it, then look again.
@@ -289,7 +362,7 @@ struct LeftoversView: View {
         VStack(alignment: .leading, spacing: 20) {
             HeroCard(glow: .ember, label: "Leftovers of removed apps", bytes: store.leftovers.map { $0.map(\.bytes).reduce(0, +) },
                      detail: (store.leftovers.map { "\($0.count) app\($0.count == 1 ? " that is" : "s that are") gone left files behind. " } ?? "")
-                        + "Caches, logs and web data unused for a week; settings and data too while the app is in the Trash. Everything goes to the Trash.",
+                        + "Caches, logs and web data unused for a week; settings and data too while the app is in the Trash or was just deleted. Everything goes to the Trash.",
                      scanning: store.scanning, progress: "Looking through your Library", checked: store.checkedAt) {
                 Button("Rescan") { Task { await store.load() } }.buttonStyle(.pillSecondary).disabled(store.scanning)
                     .keyboardShortcut("r", modifiers: .command)

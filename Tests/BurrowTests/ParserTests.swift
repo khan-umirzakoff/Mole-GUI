@@ -316,4 +316,14 @@ struct LeftoverTests {
         #expect(!ResultCache.isStale(Date()))
         #expect(ResultCache.isStale(Date().addingTimeInterval(-ResultCache.staleAfter - 1)))
     }
+
+    @Test func removedAppsDiff() {
+        let trash = "/Users/me/.Trash"
+        let seen = ["/Applications/A.app": "com.a", "/Applications/B.app": "com.b", "/Applications/C.app": "com.c",
+                    "/Applications/NoID.app": "", trash + "/Old.app": "com.old"]
+        // A went to the Trash, B was renamed, C is still there, NoID has no bundle id, Old left the Trash.
+        let now = [trash + "/A.app": "com.a", "/Applications/B 2.app": "com.b", "/Applications/C.app": "com.c"]
+        #expect(LeftoverStore.removedApps(seen: seen, now: now) == ["com.a": "/Applications/A.app"])
+        #expect(LeftoverStore.removedApps(seen: seen, now: seen).isEmpty)
+    }
 }

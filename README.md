@@ -45,14 +45,14 @@ pick) go to the Trash.
 |---|---|---|
 | Overview | `mo status --watch` | Live free space, health score, CPU, memory, battery, network, busiest processes |
 | Clean | `mo clean` | Dry-run preview by category, then one-click clean (system caches optional, asks for your password natively) |
-| Uninstall | `mo uninstall` | All apps with sizes, multi-select, preview leftovers, Trash or permanent; **Leftovers of removed apps**: caches, logs, web data and settings of apps that are already gone, grouped per app, to the Trash |
+| Uninstall | `mo uninstall` | All apps with sizes, multi-select, preview leftovers, Trash or permanent; **Leftovers of removed apps**: caches, logs, web data and settings of apps that are already gone, grouped per app, to the Trash. Delete an app anywhere (Finder, the Dock) and a panel at the top of the screen offers its leftovers at once |
 | Optimize | `mo optimize` | Pending maintenance steps and performance diagnosis |
 | Disk Map | `mo analyze --json` | Treemap with drill-down, reveal in Finder, move to Trash |
 | Projects | `mo purge` | Build folders grouped by project, remove all or a selection |
 | Installers | (native, same folders as `mo installer`) | Old `.dmg`, `.pkg`, `.iso`, `.xip` files, move to Trash |
 | Slim Apps | `mo slim` | Intel code in universal apps, pick which apps to slim |
 | History | `mo history --json` | Every run and what it changed |
-| Settings | config files, `mo touchid` | Protected paths, project scan folders, Touch ID for sudo, full removal |
+| Settings | config files, `mo touchid` | Protected paths, project scan folders, Touch ID for sudo, offers after an app is deleted, open at login |
 
 Every scan is a Mole dry run that keeps going while you look at other pages; the sidebar marks
 the pages still working, and the page shows what Mole has found so far. Results are kept between
@@ -84,12 +84,16 @@ xattr -dr com.apple.quarantine /Applications/Burrow.app
 
 Requires macOS 26 or later on Apple silicon.
 
+Burrow updates itself: it checks the GitHub releases once a day ([Sparkle](https://sparkle-project.org),
+EdDSA-signed) and installs a new version when you quit. **Burrow → Check for Updates…** looks
+right away. Versions before 0.4.0 need one manual download.
+
 ## Nothing left behind
 
 Mole ships inside the app (`Contents/Resources/mole`); nothing is installed into your system.
 Mole keeps its settings and logs in `~/.config/mole`, `~/.cache/mole` and `~/Library/Logs/mole`.
-**Settings → Remove Burrow completely** moves those, the app's preferences and the app to the
-Trash. If Mole is also installed on its own (`mo` on your PATH), Mole's files stay.
+To uninstall, drag Burrow to the Trash like any Mac app. What is left (its preferences and
+cached scans, Mole's folders above) is what any cleaner's leftover scan, Mole's included, finds.
 
 ## Build
 

@@ -45,9 +45,16 @@ screenshots of every page and the diff, never by Codex (no design taste); Codex 
 engine/backend code.
 
 ## Releases
-GitHub releases carry `Burrow.dmg` (`scripts/dmg.sh`) and `Burrow.zip`
-(`ditto -c -k --keepParent build/Burrow.app`). Bump `VERSION`, build, test, then
-`gh release create v<version>`.
+GitHub releases carry `Burrow.dmg` (`scripts/dmg.sh`), `Burrow.zip`
+(`ditto -c -k --keepParent build/Burrow.app`) and `appcast.xml` (`scripts/appcast.sh`). Bump
+`VERSION`, build, test, zip, run `scripts/appcast.sh`, then `gh release create v<version>` with all
+three. Every installed Burrow reads `releases/latest/download/appcast.xml` (Sparkle 2, a binary
+target in Package.swift; the package itself clones Sparkle's whole history) and updates itself on
+quit, so a release without `appcast.xml` stalls every user on the old version. The update zip is
+signed with the EdDSA key in the owner's login Keychain (`generate_keys`, public key in
+`scripts/bundle.sh`); lose it and updates stop: keep an export (`generate_keys -x <file>`) off this
+Mac. Test an update end to end with a copy that has another bundle id and a local http appcast
+(`NSAllowsLocalNetworking`), never with the owner's own defaults.
 `scripts/demo-video.sh` records the full tour (`build/demo.mp4`, a release asset, plus
 `build/demo-raw.mov`): the `-tour` walk, screen-recorded with `screencapture -v` (`cacheDisplay`
 misses SwiftUI transitions); the window must stay uncovered ~45 s. `promo/` is the 17 s HyperFrames
