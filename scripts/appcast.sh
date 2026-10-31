@@ -2,16 +2,17 @@
 # Writes build/appcast.xml for the release in build/Burrow.zip, signed with the Sparkle key in
 # the login Keychain (made once with generate_keys). Upload it with the release: every installed
 # Burrow reads releases/latest/download/appcast.xml and updates itself from it.
-# Usage: scripts/appcast.sh   (after scripts/bundle.sh and the ditto zip)
+# Usage: scripts/appcast.sh [build dir]   (default: build/, after bundle.sh and the ditto zip)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 VERSION="$(cat VERSION)"
-ZIP=build/Burrow.zip
+OUT="${1:-build}"
+ZIP="$OUT/Burrow.zip"
 SIGN="$(find .build/artifacts -path '*Sparkle/bin/sign_update' | head -1)"
 SIGNATURE="$("$SIGN" "$ZIP")"   # sparkle:edSignature="…" length="…"
 
-cat > build/appcast.xml <<XML
+cat > "$OUT/appcast.xml" <<XML
 <?xml version="1.0" encoding="utf-8"?>
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
   <channel>
@@ -29,4 +30,4 @@ cat > build/appcast.xml <<XML
   </channel>
 </rss>
 XML
-echo "Wrote build/appcast.xml for $VERSION"
+echo "Wrote $OUT/appcast.xml for $VERSION"
