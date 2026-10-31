@@ -60,6 +60,10 @@ launches: pages show the last result at once and never re-scan on their own. At 
 missing or older than six hours is checked again in the background, one scan at a time; ⌘R
 re-scans whenever you want.
 
+A real run (Clean, Slim, Uninstall, Optimize) shows live progress instead of a terminal: the space
+freed so far, what Mole is doing now and each step as it finishes, with Mole's own log one click
+away. Mole's questions (your password, its final confirmation) become native buttons.
+
 ### Keyboard
 
 | Keys | Does |
