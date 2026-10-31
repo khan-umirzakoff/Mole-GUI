@@ -342,6 +342,15 @@ struct LeftoverTests {
         let done = RunProgress.parse(lines: slim + ["Slimmed 1 app, freed 580MB: Google Chrome"], live: "")
         #expect(done.freed == 580_000_000 && done.now == nil)
 
+        // A size in a name or a warning: the summary is anchored, sized warnings after work stay warnings.
+        let odd = RunProgress.parse(lines: ["✓ [1/2] Tool, 1GB", "◎ [2/2] Tool 2GB, still running",
+                                            "Slimmed 1 app, freed 1GB: Tool", "Freed 2TB", "✓ Huge, 99999999999TB"], live: "")
+        #expect(odd.steps.map(\.kind) == [.done, .note, .done] && odd.freed == 1_000_000_000)
+        #expect(odd.position?.at == 2 && odd.positionDone)
+        // Uninstall lists files with ✓ before it asks; declining leaves nothing done.
+        let declined = RunProgress.parse(lines: ["✓ ~/Library/Caches/com.app", "➤ Remove 1 app, 2MB  Enter confirm, ESC cancel:"], live: "")
+        #expect(declined.steps.isEmpty)
+
         let clean = RunProgress.parse(lines: ["➤ Notification Center", "✓ Chrome, freed 5MB", "➤ User essentials", "✓ User app cache · 12 items, 1.20GB", "✓ Trash · emptied",
                                               "Tracked cleanup: 1.5GB"], live: "")
         #expect(clean.steps.map(\.section) == ["Notification Center", "User essentials", "User essentials"])

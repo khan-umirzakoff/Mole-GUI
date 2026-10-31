@@ -105,7 +105,7 @@ final class AppModel: ObservableObject {
             await leftovers.load()
             await refreshStale()
         }
-        if UserDefaults.standard.string(forKey: "snapshot") == nil, UserDefaults.standard.string(forKey: "tour") == nil {
+        if !Self.reviewMode {
             removals.start()
         }
         // A window left open for days still gets fresh results when the user comes back to it.
@@ -117,14 +117,17 @@ final class AppModel: ObservableObject {
 
     private var refreshing = false
 
+    /// Review snapshots, the demo tour and replayed runs show what is cached; they never start Mole.
+    nonisolated static var reviewMode: Bool {
+        ["snapshot", "tour", "replayRun"].contains { UserDefaults.standard.string(forKey: $0) != nil }
+    }
+
     /// Last results come from the cache at once. In the background, one at a time so the Mac
     /// stays responsive, anything missing or older than a few hours is checked again: quick
     /// scans first, the slow walks (Disk Map, project folders) last. Pages never re-scan on
     /// their own; the Rescan buttons do.
     func refreshStale() async {
-        // Review snapshots and the demo tour show what is cached; they never start Mole.
-        guard !refreshing, UserDefaults.standard.string(forKey: "snapshot") == nil,
-              UserDefaults.standard.string(forKey: "tour") == nil else { return }
+        guard !refreshing, !Self.reviewMode else { return }
         refreshing = true
         defer { refreshing = false }
         await leftovers.refreshIfAppsChanged()

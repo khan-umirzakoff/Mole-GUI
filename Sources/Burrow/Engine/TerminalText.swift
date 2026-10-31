@@ -38,7 +38,9 @@ enum ByteSize {
               let n = Range(m.range(at: 1), in: s), let u = Range(m.range(at: 2), in: s),
               let value = Double(s[n]) else { return nil }
         let mult: Double = ["B": 1, "KB": 1e3, "MB": 1e6, "GB": 1e9, "TB": 1e12][String(s[u])] ?? 1
-        return Int64(value * mult)
+        let bytes = value * mult
+        // Beyond Int64 is a garbled line, not a size.
+        return bytes < 9e18 ? Int64(bytes) : nil
     }
 
     /// "1.3 GB"; zero stays a number ("0 KB") so the dotted numerals can draw it. Always a decimal

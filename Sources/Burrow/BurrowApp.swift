@@ -73,8 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         scheduleSnapshot()
         let defaults = UserDefaults.standard
-        if Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") != nil,
-           defaults.string(forKey: "snapshot") == nil, defaults.string(forKey: "tour") == nil {
+        if Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") != nil, !AppModel.reviewMode {
             updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
         }
         // Opened at login only to watch for deleted apps: no window until the user asks.

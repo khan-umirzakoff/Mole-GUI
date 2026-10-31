@@ -222,7 +222,7 @@ private struct RunActivity: View {
     private var fraction: Double? {
         if phase == .finished(0) { return idle ? 0 : 1 }
         if let plan, plan > 0 { return min(Double(progress.freed) / Double(plan), 1) }
-        if let pos = progress.position, pos.of > 0 { return Double(pos.at - 1) / Double(pos.of) }
+        if let pos = progress.position, pos.of > 0 { return Double(pos.at - (progress.positionDone ? 0 : 1)) / Double(pos.of) }
         return nil
     }
 

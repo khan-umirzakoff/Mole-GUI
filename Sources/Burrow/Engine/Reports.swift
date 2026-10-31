@@ -318,30 +318,41 @@ struct RunProgress: Equatable {
     var planned: [Step] = []
     /// The spinner's text: "Slimming Google Chrome".
     var now: String?
-    /// "[2/5]" in Mole's output: which item of how many.
+    /// "[2/5]" in Mole's output: which item of how many, and whether that item is finished.
     var position: (at: Int, of: Int)?
+    var positionDone = false
     /// Mole's own total from its closing summary ("freed 576.3MB", "Tracked cleanup: 1.2GB").
     var summaryBytes: Int64?
 
-    var freed: Int64 { summaryBytes ?? steps.filter { $0.kind == .done }.compactMap(\.bytes).reduce(0, +) }
+    var freed: Int64 {
+        summaryBytes ?? steps.filter { $0.kind == .done }.compactMap(\.bytes).reduce(0) { $0.addingReportingOverflow($1).overflow ? .max : $0 + $1 }
+    }
 
     static func == (a: Self, b: Self) -> Bool {
         a.steps == b.steps && a.planned == b.planned && a.now == b.now && a.position?.at == b.position?.at
-            && a.position?.of == b.position?.of && a.summaryBytes == b.summaryBytes
+            && a.position?.of == b.position?.of && a.positionDone == b.positionDone && a.summaryBytes == b.summaryBytes
     }
 
     private static let counter = try! NSRegularExpression(pattern: "^\\[([0-9]+)/([0-9]+)\\]\\s*")
+    /// Mole's closing totals: slim and uninstall ("Slimmed 2 apps, freed 1.2GB"), clean, purge.
+    private static let summary = try! NSRegularExpression(
+        pattern: "^(?:(?:Slimmed|Removed|Uninstalled) [^:]*?, freed|Tracked cleanup:|Estimated space freed:|Space freed:)\\s*([0-9.]+\\s?(?:TB|GB|MB|KB|B))",
+        options: .caseInsensitive)
 
     static func parse(lines: [String], live: String) -> RunProgress {
         var p = RunProgress()
         var section: String?
         for line in lines {
             guard let icon = line.first else { continue }
-            // The closing summary is plain text; a step line that says "freed" is not the total.
-            if !"➤✓☻✗◎→⊙".contains(icon),
-               let r = line.range(of: "freed", options: .caseInsensitive) ?? line.range(of: "cleanup:", options: .caseInsensitive),
-               let bytes = ByteSize.first(in: String(line[r.upperBound...])) {
-                p.summaryBytes = bytes
+            let ns = NSRange(line.startIndex..., in: line)
+            if let m = summary.firstMatch(in: line, range: ns), let r = Range(m.range(at: 1), in: line) {
+                p.summaryBytes = ByteSize.first(in: String(line[r]))
+            }
+            // Mole lists what it will do (uninstall prints ✓ rows) before it asks; that was a preview.
+            if line.range(of: "enter confirm", options: .caseInsensitive) != nil
+                || line.range(of: "esc cancel", options: .caseInsensitive) != nil {
+                p.steps.removeAll()
+                p.position = nil
             }
             var body = String(line.dropFirst()).trimmingCharacters(in: .whitespaces)
             let kind: Step.Kind
@@ -354,18 +365,18 @@ struct RunProgress: Equatable {
             case "☻", "✗": kind = .failed
             // ◎ with a size, before any work, lists what Mole is about to do; otherwise it is a warning.
             case "◎":
-                if ByteSize.first(in: body) != nil {
-                    if section == nil, p.steps.isEmpty, let comma = body.range(of: ",", options: .backwards) {
-                        p.planned.append(.init(id: p.planned.count, kind: .note, section: nil,
-                                               name: body[..<comma.lowerBound].trimmingCharacters(in: .whitespaces),
-                                               detail: "", bytes: ByteSize.first(in: String(body[comma.upperBound...]))))
-                    }
+                // The list above a confirmation: no section, no "[n/m]", nothing done yet.
+                if ByteSize.first(in: body) != nil, section == nil, p.steps.isEmpty, !body.hasPrefix("["),
+                   let comma = body.range(of: ",", options: .backwards) {
+                    p.planned.append(.init(id: p.planned.count, kind: .note, section: nil,
+                                           name: body[..<comma.lowerBound].trimmingCharacters(in: .whitespaces),
+                                           detail: "", bytes: ByteSize.first(in: String(body[comma.upperBound...]))))
                     continue
                 }
                 kind = .note
             default: continue
             }
-            if let (at, of) = strip(&body) { p.position = (at, of) }
+            if let (at, of) = strip(&body) { (p.position, p.positionDone) = ((at, of), true) }
             let parts = body.components(separatedBy: " · ")
             let name: String, detail: String
             if parts.count > 1 {
@@ -381,7 +392,7 @@ struct RunProgress: Equatable {
         // The spinner line: a braille frame, then the message.
         if let first = live.unicodeScalars.first, (0x2800...0x28FF).contains(first.value) {
             var text = String(live.unicodeScalars.dropFirst().map(Character.init)).trimmingCharacters(in: .whitespaces)
-            if let (at, of) = strip(&text) { p.position = (at, of) }
+            if let (at, of) = strip(&text) { (p.position, p.positionDone) = ((at, of), false) }
             while text.hasSuffix(".") || text.hasSuffix("…") { text.removeLast() }
             if !text.isEmpty { p.now = text }
         }
