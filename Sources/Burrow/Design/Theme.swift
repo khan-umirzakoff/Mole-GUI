@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The glow palette: each card gets one hue that bleeds from its edges or its core.
 enum Glow: CaseIterable {
-    case magenta, violet, blue, ember, sage, graphite
+    case magenta, violet, blue, ember, sage, lime, graphite
 
     var color: Color {
         switch self {
@@ -11,6 +11,7 @@ enum Glow: CaseIterable {
         case .blue: Color(red: 0.25, green: 0.38, blue: 1.0)
         case .ember: Color(red: 0.94, green: 0.40, blue: 0.24)
         case .sage: Color(red: 0.43, green: 0.58, blue: 0.53)
+        case .lime: Color(red: 0.60, green: 0.82, blue: 0.28)
         case .graphite: Color(white: 0.42)
         }
     }

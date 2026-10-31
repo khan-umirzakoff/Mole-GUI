@@ -326,4 +326,26 @@ struct LeftoverTests {
         #expect(LeftoverStore.removedApps(seen: seen, now: now) == ["com.a": "/Applications/A.app"])
         #expect(LeftoverStore.removedApps(seen: seen, now: seen).isEmpty)
     }
+
+    @Test func runProgress() {
+        // A slim run as the sheet sees it: menu rows, the confirm list, the prompt, then the work.
+        let slim = ["○ Steam                4.9MB", "Apps to slim:", "◎ Google Chrome , 576.3MB", "◎ Zoom, 120MB",
+                    "Originals move to the Trash. App updates bring the Intel code back.",
+                    "➤ Slim 2 apps, 696.3MB  Enter confirm, ESC cancel:",
+                    "✓ [1/2] Google Chrome , 576.3MB", "◎ [2/2] Zoom, could not move the original to Trash"]
+        let p = RunProgress.parse(lines: slim, live: "⠙ [2/2] Slimming Zoom...")
+        #expect(p.steps.map(\.kind) == [.done, .note])
+        #expect(p.steps[0].name == "Google Chrome" && p.steps[0].bytes == 576_300_000 && p.steps[0].section == nil)
+        #expect(p.now == "Slimming Zoom" && p.position?.at == 2 && p.position?.of == 2)
+        #expect(p.freed == 576_300_000)
+        #expect(p.planned.map(\.name) == ["Google Chrome", "Zoom"] && p.planned[1].bytes == 120_000_000)
+        let done = RunProgress.parse(lines: slim + ["Slimmed 1 app, freed 580MB: Google Chrome"], live: "")
+        #expect(done.freed == 580_000_000 && done.now == nil)
+
+        let clean = RunProgress.parse(lines: ["➤ Notification Center", "✓ Chrome, freed 5MB", "➤ User essentials", "✓ User app cache · 12 items, 1.20GB", "✓ Trash · emptied",
+                                              "Tracked cleanup: 1.5GB"], live: "")
+        #expect(clean.steps.map(\.section) == ["Notification Center", "User essentials", "User essentials"])
+        #expect(clean.steps[1].detail == "12 items, 1.20GB" && clean.steps[2].bytes == nil)
+        #expect(clean.freed == 1_500_000_000)
+    }
 }

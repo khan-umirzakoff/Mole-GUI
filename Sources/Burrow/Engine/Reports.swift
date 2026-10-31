@@ -296,3 +296,104 @@ struct InstalledApp: Decodable, Identifiable, Hashable {
     var id: String { path }
     var bytes: Int64? { size.flatMap { ByteSize.first(in: $0) } }
 }
+
+// MARK: - A real run, live
+
+/// What a real Mole run has done so far, read from its terminal output: what it is doing now,
+/// the steps it finished, and how much it freed. The run sheet draws this instead of the log.
+struct RunProgress: Equatable {
+    struct Step: Identifiable, Equatable {
+        enum Kind { case done, note, failed }
+        let id: Int
+        let kind: Kind
+        /// The ➤ heading it ran under ("User essentials").
+        let section: String?
+        let name: String
+        let detail: String
+        let bytes: Int64?
+    }
+
+    var steps: [Step] = []
+    /// What Mole listed before it started ("◎ Google Chrome, 576MB" above its confirmation).
+    var planned: [Step] = []
+    /// The spinner's text: "Slimming Google Chrome".
+    var now: String?
+    /// "[2/5]" in Mole's output: which item of how many.
+    var position: (at: Int, of: Int)?
+    /// Mole's own total from its closing summary ("freed 576.3MB", "Tracked cleanup: 1.2GB").
+    var summaryBytes: Int64?
+
+    var freed: Int64 { summaryBytes ?? steps.filter { $0.kind == .done }.compactMap(\.bytes).reduce(0, +) }
+
+    static func == (a: Self, b: Self) -> Bool {
+        a.steps == b.steps && a.planned == b.planned && a.now == b.now && a.position?.at == b.position?.at
+            && a.position?.of == b.position?.of && a.summaryBytes == b.summaryBytes
+    }
+
+    private static let counter = try! NSRegularExpression(pattern: "^\\[([0-9]+)/([0-9]+)\\]\\s*")
+
+    static func parse(lines: [String], live: String) -> RunProgress {
+        var p = RunProgress()
+        var section: String?
+        for line in lines {
+            guard let icon = line.first else { continue }
+            // The closing summary is plain text; a step line that says "freed" is not the total.
+            if !"➤✓☻✗◎→⊙".contains(icon),
+               let r = line.range(of: "freed", options: .caseInsensitive) ?? line.range(of: "cleanup:", options: .caseInsensitive),
+               let bytes = ByteSize.first(in: String(line[r.upperBound...])) {
+                p.summaryBytes = bytes
+            }
+            var body = String(line.dropFirst()).trimmingCharacters(in: .whitespaces)
+            let kind: Step.Kind
+            switch icon {
+            case "➤":
+                // Headings, not the "➤ Slim 1 app, 576MB  Enter confirm" prompt.
+                if !body.hasSuffix(":"), body.range(of: "enter confirm", options: .caseInsensitive) == nil { section = body }
+                continue
+            case "✓": kind = .done
+            case "☻", "✗": kind = .failed
+            // ◎ with a size, before any work, lists what Mole is about to do; otherwise it is a warning.
+            case "◎":
+                if ByteSize.first(in: body) != nil {
+                    if section == nil, p.steps.isEmpty, let comma = body.range(of: ",", options: .backwards) {
+                        p.planned.append(.init(id: p.planned.count, kind: .note, section: nil,
+                                               name: body[..<comma.lowerBound].trimmingCharacters(in: .whitespaces),
+                                               detail: "", bytes: ByteSize.first(in: String(body[comma.upperBound...]))))
+                    }
+                    continue
+                }
+                kind = .note
+            default: continue
+            }
+            if let (at, of) = strip(&body) { p.position = (at, of) }
+            let parts = body.components(separatedBy: " · ")
+            let name: String, detail: String
+            if parts.count > 1 {
+                (name, detail) = (parts[0], parts.dropFirst().joined(separator: " · "))
+            } else if let comma = body.range(of: ", ") {
+                (name, detail) = (String(body[..<comma.lowerBound]), String(body[comma.upperBound...]))
+            } else {
+                (name, detail) = (body, "")
+            }
+            p.steps.append(.init(id: p.steps.count, kind: kind, section: section, name: name.trimmingCharacters(in: .whitespaces),
+                                 detail: detail, bytes: ByteSize.first(in: detail)))
+        }
+        // The spinner line: a braille frame, then the message.
+        if let first = live.unicodeScalars.first, (0x2800...0x28FF).contains(first.value) {
+            var text = String(live.unicodeScalars.dropFirst().map(Character.init)).trimmingCharacters(in: .whitespaces)
+            if let (at, of) = strip(&text) { p.position = (at, of) }
+            while text.hasSuffix(".") || text.hasSuffix("…") { text.removeLast() }
+            if !text.isEmpty { p.now = text }
+        }
+        return p
+    }
+
+    /// Takes a leading "[2/5] " off and returns its numbers.
+    private static func strip(_ s: inout String) -> (Int, Int)? {
+        let ns = NSRange(s.startIndex..., in: s)
+        guard let m = counter.firstMatch(in: s, range: ns), let a = Range(m.range(at: 1), in: s), let b = Range(m.range(at: 2), in: s),
+              let at = Int(s[a]), let of = Int(s[b]), let all = Range(m.range, in: s) else { return nil }
+        s.removeSubrange(all)
+        return (at, of)
+    }
+}

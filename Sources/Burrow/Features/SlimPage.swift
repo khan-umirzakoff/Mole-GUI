@@ -67,7 +67,7 @@ struct SlimPage: View {
 
     private func slim() {
         let names = Array(selected)
-        model.run("Slimming apps", ["slim"], responders: [.selectInMenu(titled: "Select apps to slim", names: names)]) {
+        model.run("Slimming apps", ["slim"], plan: selectedBytes, responders: [.selectInMenu(titled: "Select apps to slim", names: names)]) {
             selected.removeAll()
             scan.start()
         }

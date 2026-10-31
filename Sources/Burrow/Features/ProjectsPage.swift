@@ -160,7 +160,7 @@ struct ProjectsPage: View {
                             button: "Continue") {
                 // Mole's selector opens with exactly these folders ticked (recent ones stay off);
                 // Enter accepts it, then Mole asks for the final confirmation in the sheet.
-                model.run("Removing build folders", ["purge"],
+                model.run("Removing build folders", ["purge"], plan: selectedBytes,
                           responders: [.when("Select Artifacts to Purge", send: "\r")]) { rescan() }
             }
         } else {

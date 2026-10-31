@@ -141,13 +141,21 @@ final class AppModel: ObservableObject {
     }
 
     /// Starts a Mole command in the run sheet. `onFinish` runs after the user closes the sheet.
-    func run(_ title: String, _ args: [String], responders: [MoleSession.Responder] = [],
+    func run(_ title: String, _ args: [String], plan: Int64? = nil, responders: [MoleSession.Responder] = [],
              onFinish: (() -> Void)? = nil) {
         guard session == nil else { return }
-        let s = MoleSession(title: title, args: args, responders: responders)
+        let s = MoleSession(title: title, args: args, plan: plan, responders: responders)
         finishHandler = onFinish
         session = s
         s.start()
+    }
+
+    /// `-replayRun <transcript>`: the run sheet plays a recorded Mole run; Mole never starts.
+    func replay(_ title: String, transcript: String, plan: Int64?, pace: Double = 0.45) {
+        guard session == nil else { return }
+        let s = MoleSession(title: title, args: [], plan: plan)
+        session = s
+        s.replay(transcript, pace: pace)
     }
 
     private var finishHandler: (() -> Void)?

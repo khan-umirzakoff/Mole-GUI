@@ -25,33 +25,24 @@ struct RunSheet: View {
                 Orb(state: orbState).frame(width: 54, height: 54)
             }
 
-            GlowCard(glow: glowForState, style: .core, padding: 18) {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(Array(session.lines.enumerated()), id: \.offset) { _, line in
-                            LogLine(text: line)
-                        }
-                        if !session.live.isEmpty, !session.isFinished {
-                            LogLine(text: session.live).opacity(0.75)
-                        }
-                        if session.lines.isEmpty, session.live.isEmpty {
-                            Text("Starting Mole…").caption()
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            GlowCard(glow: glowForState, style: .core, padding: 22) {
+                if showLog {
+                    log
+                } else {
+                    RunActivity(progress: RunProgress.parse(lines: session.lines, live: session.live),
+                                plan: session.plan, glow: glowForState, phase: session.phase)
                 }
-                .defaultScrollAnchor(.bottom)
-                .scrollIndicators(showLog ? .automatic : .never)
             }
-            .frame(height: showLog ? 420 : 240)
+            .frame(height: showLog ? 420 : 480)
             .animation(Motion.spring, value: showLog)
 
             prompt
                 .transition(.blurFade)
 
             HStack {
-                Button(showLog ? "Smaller log" : "Larger log") { showLog.toggle() }
+                Button(showLog ? "Hide log" : "Show log") { showLog.toggle() }
                     .buttonStyle(.pillSecondary)
+                    .help("Mole's own output, line by line")
                 Spacer()
                 if session.isFinished {
                     Button("Done") { model.closeSession() }
@@ -68,6 +59,25 @@ struct RunSheet: View {
         .background(Theme.background)
         .animation(Motion.spring, value: session.phase)
         .interactiveDismissDisabled(!session.isFinished)
+    }
+
+    /// Everything Mole printed, as it printed it.
+    private var log: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(session.lines.enumerated()), id: \.offset) { _, line in
+                    LogLine(text: line)
+                }
+                if !session.live.isEmpty, !session.isFinished {
+                    LogLine(text: session.live).opacity(0.75)
+                }
+                if session.lines.isEmpty, session.live.isEmpty {
+                    Text("Starting Mole…").caption()
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .defaultScrollAnchor(.bottom)
     }
 
     @ViewBuilder private var prompt: some View {
@@ -134,7 +144,7 @@ struct RunSheet: View {
 
     private var glowForState: Glow {
         switch orbState {
-        case .done: .sage
+        case .done: .lime
         case .failed: .ember
         case .waiting: .violet
         case .working: .blue
@@ -169,6 +179,191 @@ struct QuickReply {
             options = [.init(label: "Enter", keys: "\r", primary: true), .init(label: "Cancel", keys: "\u{1B}")]
         }
         return options
+    }
+}
+
+/// A real run drawn as progress, not a terminal: how much is freed, what Mole is doing now,
+/// and each step as it finishes.
+private struct RunActivity: View {
+    let progress: RunProgress
+    let plan: Int64?
+    let glow: Glow
+    let phase: MoleSession.Phase
+
+    private var done: [RunProgress.Step] { progress.steps.filter { $0.kind == .done } }
+    private var showsBytes: Bool { plan != nil || progress.freed > 0 }
+    private var finished: Bool { if case .finished = phase { return true }; return false }
+    private var working: Bool { phase == .running }
+    /// Mole exited cleanly but did nothing, for example after its own confirmation was declined.
+    private var idle: Bool { phase == .finished(0) && progress.steps.isEmpty && progress.freed == 0 }
+    /// Listed items Mole has not reported done yet.
+    private var upcoming: [RunProgress.Step] {
+        progress.planned.filter { item in !progress.steps.contains { $0.name == item.name } }
+    }
+
+    /// Mole's spinner text while it works; otherwise what the run is waiting for, or how it ended.
+    private var activity: String {
+        switch phase {
+        case .running:
+            progress.now ?? progress.steps.last?.section.map { "Cleaning \($0.lowercased())" }
+                ?? (progress.steps.isEmpty ? "Starting Mole" : "Working")
+        case .needsPassword: "Waiting for your password"
+        case .needsAnswer: "Waiting for your answer"
+        case .finished(let code) where code == 0:
+            idle ? "Nothing was changed"
+                : showsBytes ? "Freed \(progress.freed.bytesText) · \(steps(done.count))" : "\(steps(done.count)) done"
+        case .finished(let code): code == 130 || code == 143 ? "Stopped" : "Mole stopped early"
+        }
+    }
+
+    private func steps(_ n: Int) -> String { "\(n) step\(n == 1 ? "" : "s")" }
+
+    /// Freed against the plan; else items of the "[2/5]" counter. Full once Mole is done.
+    private var fraction: Double? {
+        if phase == .finished(0) { return idle ? 0 : 1 }
+        if let plan, plan > 0 { return min(Double(progress.freed) / Double(plan), 1) }
+        if let pos = progress.position, pos.of > 0 { return Double(pos.at - 1) / Double(pos.of) }
+        return nil
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .bottom) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(showsBytes ? (finished ? "Freed" : "Freed so far") : "Steps done").caption()
+                    CountingValue(value: Double(showsBytes ? progress.freed : Int64(done.count)), bytes: showsBytes)
+                        .animation(Motion.reduced ? nil : .smooth(duration: 0.6), value: progress.freed)
+                        .scaleEffect(finished && !Motion.reduced ? 1.04 : 1, anchor: .bottomLeading)
+                        .animation(Motion.spring, value: finished)
+                }
+                Spacer()
+                if let pos = progress.position, pos.of > 1, !finished {
+                    VStack(alignment: .trailing, spacing: 12) {
+                        Text("Item").caption()
+                        DotMatrixText(text: "\(pos.at)/\(pos.of)", dot: 3.5, color: .white.opacity(0.8))
+                    }
+                }
+            }
+            if let fraction {
+                DotMeter(value: fraction, count: 72, color: glow.color)
+            }
+            HStack(spacing: 12) {
+                Group {
+                    if working { PulseDot(color: glow.color) } else { Color.clear }
+                }
+                .frame(width: 18, height: 18)
+                Text(activity)
+                    .font(.system(size: 13.5, weight: .medium))
+                    .lineLimit(1).truncationMode(.middle)
+                    .shimmer(working)
+                    .id(activity)
+                    .transition(.blurFade)
+            }
+            .animation(Motion.quick, value: activity)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        Color.clear.frame(height: 4)
+                        ForEach(progress.steps) { step in
+                            if let section = step.section, step.id == 0 || progress.steps[step.id - 1].section != section {
+                                Text(section).font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.tertiaryText)
+                                    .textCase(.uppercase).padding(.top, step.id == 0 ? 0 : 6)
+                            }
+                            StepRow(step: step).id(step.id).transition(.blurFade)
+                        }
+                        ForEach(upcoming) { item in
+                            StepRow(step: item, upcoming: true,
+                                    current: working && progress.now?.hasSuffix(item.name) == true)
+                                .id("planned-\(item.id)")
+                        }
+                        // Room under the last row, so following it keeps it clear of the fade.
+                        Color.clear.frame(height: 28).id("end")
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .animation(Motion.spring, value: progress.steps.count)
+                }
+                .scrollIndicators(finished ? .automatic : .never)
+                // Rows that run past either edge fade out instead of being cut.
+                .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.04),
+                                             .init(color: .black, location: 0.9), .init(color: .clear, location: 1)],
+                                     startPoint: .top, endPoint: .bottom))
+                .onChange(of: progress.steps.count) {
+                    // Follow the newest finished step; with a planned list, keep the current item in view.
+                    guard let last = progress.steps.last else { return }
+                    withAnimation(Motion.spring) {
+                        if upcoming.isEmpty { proxy.scrollTo("end", anchor: .bottom) } else { proxy.scrollTo(last.id, anchor: .center) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The freed figure (or the step count), counting up to each new value instead of jumping.
+private struct CountingValue: View, Animatable {
+    var value: Double
+    let bytes: Bool
+    var animatableData: Double {
+        get { value }
+        set { value = newValue }
+    }
+
+    var body: some View {
+        if bytes {
+            let m = Int64(value).metric
+            MetricValue(value: m.value, unit: m.unit, dot: 5, live: true)
+        } else {
+            MetricValue(value: "\(Int(value.rounded()))", dot: 5, live: true)
+        }
+    }
+}
+
+private struct StepRow: View {
+    let step: RunProgress.Step
+    /// Listed by Mole but not done yet.
+    var upcoming = false
+    /// The item Mole is working on now.
+    var current = false
+    @ViewState private var landed = false
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Group {
+                if current {
+                    PulseDot()
+                } else {
+                    switch step.kind {
+                    case .done: CheckDot(on: landed && !upcoming)
+                    case .note where upcoming: CheckDot(on: false)
+                    case .note: Image(systemName: "exclamationmark.circle.fill").foregroundStyle(Glow.ember.color)
+                    case .failed: Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.danger)
+                    }
+                }
+            }
+            .frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(step.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                    .foregroundStyle(upcoming && !current ? Theme.tertiaryText : .white)
+                    .shimmer(current)
+                if !detail.isEmpty { Text(detail).caption().lineLimit(1) }
+            }
+            Spacer(minLength: 8)
+            if let bytes = step.bytes {
+                Text(bytes.bytesText).font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                    .opacity(upcoming ? 0.4 : 1)
+            }
+        }
+        .animation(Motion.quick, value: current)
+        // The check pops in once the row is on screen.
+        .onAppear { landed = true }
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(upcoming ? (current ? "In progress" : "Waiting") : "")
+    }
+
+    /// The detail without the size shown on the right ("12 items, 1.2GB" → "12 items").
+    private var detail: String {
+        guard step.bytes != nil else { return step.detail }
+        return step.detail.components(separatedBy: ", ").filter { ByteSize.first(in: $0) == nil }.joined(separator: ", ")
     }
 }
 
@@ -225,6 +420,10 @@ struct Orb: View {
         .onAppear {
             guard !Motion.reduced else { return }
             withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) { pulse = true }
+        }
+        // A finished run stops breathing, so the open sheet costs nothing while it waits for Done.
+        .onChange(of: state) { _, state in
+            if state == .done || state == .failed { withAnimation(.easeOut(duration: 0.4)) { pulse = false } }
         }
         .accessibilityElement()
         .accessibilityLabel(accessibilityText)

@@ -66,7 +66,7 @@ struct CleanPage: View {
                         message: "Mole removes the caches and logs listed here. Protected paths are skipped."
                             + (includeSystem ? " System caches need your administrator password." : ""),
                         button: "Clean") {
-            model.run("Cleaning your Mac", ["clean"],
+            model.run("Cleaning your Mac", ["clean"], plan: scan.report?.total,
                       responders: [.when("System caches need sudo", send: includeSystem ? "\r" : " ")]) {
                 scan.start()
             }

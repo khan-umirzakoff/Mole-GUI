@@ -12,7 +12,12 @@ struct BurrowApp: App {
                 .environmentObject(model)
                 .onAppear {
                     delegate.model = model
-                    if let folder = UserDefaults.standard.string(forKey: "tour") { Tour.start(model, into: folder) }
+                    let defaults = UserDefaults.standard
+                    if let folder = defaults.string(forKey: "tour") { Tour.start(model, into: folder) }
+                    if let file = defaults.string(forKey: "replayRun"), let text = try? String(contentsOfFile: file, encoding: .utf8) {
+                        model.replay(defaults.string(forKey: "replayTitle") ?? "Slimming apps", transcript: text,
+                                     plan: Int64(defaults.string(forKey: "replayPlan") ?? ""))
+                    }
                 }
                 .frame(minWidth: 1080, minHeight: 700)
                 .preferredColorScheme(.dark)
@@ -41,6 +46,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Sparkle, reading the appcast on the GitHub releases. Only in a bundle that names a feed,
     /// and never in review snapshots or the demo tour.
     private(set) var updater: SPUStandardUpdaterController?
+
+    override init() {
+        // Burrow keeps running with its window closed, and the saved "no windows" state would
+        // start the next launch with no window at all.
+        UserDefaults.standard.register(defaults: ["ApplePersistenceIgnoreState": true])
+        super.init()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Started from `swift run` the binary is not an app bundle yet; make it a normal app.
@@ -86,18 +98,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            if let view = NSApp.windows.first(where: { $0.isVisible || $0.contentView != nil })?.contentView,
+            // An open run sheet is drawn instead of the window behind it.
+            let window = NSApp.windows.first(where: { $0.isVisible || $0.contentView != nil })
+            if let view = (window?.attachedSheet ?? window)?.contentView,
                let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
                 view.cacheDisplay(in: view.bounds, to: rep)
                 try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
             }
-            NSApp.terminate(nil)
+            // Not terminate: an open run sheet can hold it up, and nothing here needs saving.
+            Mole.terminateAll()
+            exit(0)
         }
     }
 
     /// A real Mole run (the run sheet) is not stopped silently: ask first.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let session = MainActor.assumeIsolated({ model?.session }), !session.isFinished else { return .terminateNow }
+        guard let session = MainActor.assumeIsolated({ model?.session }), !session.isFinished, session.runsMole else { return .terminateNow }
         let alert = NSAlert()
         alert.messageText = "Mole is still working"
         alert.informativeText = "“\(session.title)” has not finished. Quitting stops it where it is."

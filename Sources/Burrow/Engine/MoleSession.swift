@@ -35,6 +35,8 @@ final class MoleSession: ObservableObject, Identifiable {
     let id = UUID()
     let title: String
     let args: [String]
+    /// What the run should free, from the scan the user confirmed; drives the sheet's meter.
+    let plan: Int64?
     @Published private(set) var lines: [String] = []
     @Published private(set) var live = ""
     @Published private(set) var phase: Phase = .running
@@ -49,10 +51,13 @@ final class MoleSession: ObservableObject, Identifiable {
     /// The prompt last answered; it is not asked again until Mole prints a new line.
     private var answeredPrompt = ""
     let started = Date()
+    /// False for a replayed transcript, which quitting cannot interrupt.
+    private(set) var runsMole = true
 
-    init(title: String, args: [String], responders: [Responder] = []) {
+    init(title: String, args: [String], plan: Int64? = nil, responders: [Responder] = []) {
         self.title = title
         self.args = args
+        self.plan = plan
         self.responders = responders
     }
 
@@ -91,6 +96,26 @@ final class MoleSession: ObservableObject, Identifiable {
         masterFD = master
         readLoop(fd: master)
         waitLoop(pid: child)
+    }
+
+    /// Plays a recorded run instead of starting Mole: for review screenshots and the demo tour.
+    /// Each line of the transcript arrives `pace` seconds after the one before; a literal `\r`
+    /// in it is a carriage return.
+    func replay(_ transcript: String, pace: Double = 0.45) {
+        runsMole = false
+        Task { [weak self] in
+            for line in transcript.split(separator: "\n", omittingEmptySubsequences: false) {
+                try? await Task.sleep(for: .seconds(pace))
+                // A line ending in a literal \r stays open, like a spinner frame.
+                let raw = line.replacingOccurrences(of: "\\r", with: "\r")
+                self?.ingest(Data((raw.hasSuffix("\r") ? raw : raw + "\n").utf8))
+            }
+            try? await Task.sleep(for: .seconds(pace))
+            guard let self else { return }
+            if !self.pending.isEmpty { self.commit(self.pending); self.pending = "" }
+            self.live = ""
+            self.phase = .finished(0)
+        }
     }
 
     /// Answers the current prompt.
